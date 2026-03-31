@@ -14,13 +14,21 @@ It expects these to already exist on the cluster `PATH`:
 - `freebayes`
 - `sbatch` when using submission mode
 
+## Install
+
+```bash
+cargo install --path .
+```
+
 ## Commands
 
 ```bash
-cargo run -- tools bootstrap
-cargo run -- validate --sample-manifest samples.tsv --vcf-manifest vcfs.tsv
-cargo run -- run --sample-manifest samples.tsv --vcf-manifest vcfs.tsv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
+souporcellx tools bootstrap
+souporcellx validate --sample-manifest samples.tsv --vcf-manifest vcfs.tsv
+souporcellx run --sample-manifest samples.tsv --vcf-manifest vcfs.tsv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
 ```
+
+By default `run` performs a dry run, printing every `sbatch` command that would be executed. Add `--submit` to actually submit jobs to Slurm.
 
 ## Sample manifest
 
