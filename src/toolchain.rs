@@ -153,10 +153,14 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
 }
 
 fn build_cargo_bin(src: &Path, bin_name: &str, root: &Path) -> Result<PathBuf> {
+    println!("Building {} in {}", bin_name, src.display());
     let status = Command::new("cargo")
         .arg("build")
         .arg("--release")
         .current_dir(src)
+        // Use system zlib instead of building vendored copy (avoids build
+        // failures from old libz-sys on modern macOS/toolchains).
+        .env("LIBZ_SYS_STATIC", "0")
         .status()
         .with_context(|| format!("failed to run cargo build in {}", src.display()))?;
     if !status.success() {
