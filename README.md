@@ -200,13 +200,21 @@ merge_R1D2R2D1,AML_MRD_R1_D2_B1,/path/sample3.bam,/path/barcodes3.tsv.gz,R1D2B1
 
 ## VCF manifest
 
-Note that vartrix handles vcf.gz with the rust-htslib library; just make sure it is bgzipped and has a .tbi file.
-
 ```csv
 vcf_id,vcf_path
 kg1k,/path/filtered_2p_1kgenomes_chr.vcf
 common_highconf,/path/common_highconf.vcf
 ```
+
+### VCF requirements
+
+Vartrix only uses **CHROM**, **POS**, **REF**, and **ALT** from each VCF record. All other fields (ID, QUAL, FILTER, INFO, FORMAT/genotypes) are ignored — the FILTER column does not need to contain `PASS`.
+
+Minimum requirements:
+- **Biallelic SNPs/indels only** — multi-allelic records (>2 alleles) are silently skipped
+- **Valid nucleotide characters in ALT** — records with non-sequence-resolved ALT alleles are skipped
+- **CHROM names must match** the reference FASTA and BAM headers (e.g. `chr1` vs `1`)
+- **Format**: plain `.vcf` or bgzipped `.vcf.gz` (bgzipped files require a `.tbi` index)
 
 ## Vendored tools
 
