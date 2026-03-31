@@ -1,6 +1,6 @@
 use crate::cli::RunArgs;
 use crate::manifest::{read_sample_manifest, read_vcf_manifest, validate_sample_rows, validate_vcf_rows};
-use crate::slurm::{submit, JobSpec};
+use crate::slurm::{format_command, submit, JobSpec};
 use crate::toolchain;
 use anyhow::{Context, Result};
 use std::fs;
@@ -47,16 +47,30 @@ pub fn run(args: RunArgs) -> Result<()> {
     println!("  vcfs     = {}", vcf_rows.len());
     println!("  ks       = {:?}", ks);
 
-    if !args.submit {
-        println!("\nDry run only. Re-run with --submit to submit Slurm jobs.");
-        return Ok(());
-    }
+    let dry_run = !args.submit;
+    let mut job_counter = 0usize;
+    let mut total = 0usize;
 
-    let mut submitted = 0usize;
+    // Helper: either submit the job or print the sbatch command (dry run).
+    // Returns a job ID string (real from sbatch, or a placeholder for dry run).
+    let mut dispatch = |spec: &JobSpec| -> Result<String> {
+        if dry_run {
+            println!("{}\n", format_command(spec));
+            job_counter += 1;
+            Ok(format!("PLACEHOLDER_{}", job_counter))
+        } else {
+            let jobid = submit(spec)?;
+            println!("submitted {} -> {}", spec.job_name, jobid);
+            Ok(jobid)
+        }
+    };
+
     for vcf in &vcf_rows {
         let vcf_base = args.workdir.join(&vcf.vcf_id);
         let logdir = vcf_base.join("logs");
-        fs::create_dir_all(&logdir)?;
+        if !dry_run {
+            fs::create_dir_all(&logdir)?;
+        }
 
         let mut vartrix_jobids = Vec::new();
         for row in &sample_rows {
@@ -68,7 +82,9 @@ pub fn run(args: RunArgs) -> Result<()> {
             let row_out = vcf_base
                 .join("raw_vartrix")
                 .join(format!("{}__{}", row.library_id, bam_base));
-            fs::create_dir_all(&row_out)?;
+            if !dry_run {
+                fs::create_dir_all(&row_out)?;
+            }
 
             let cmd = format!(
                 "{} --bam {} --cell-barcodes {} --vcf {} --fasta {} --out-matrix {} --ref-matrix {} --out-barcodes {}",
@@ -93,10 +109,9 @@ pub fn run(args: RunArgs) -> Result<()> {
                     .display()
                     .to_string(),
             };
-            let jobid = submit(&spec)?;
-            println!("submitted {} -> {}", spec.job_name, jobid);
+            let jobid = dispatch(&spec)?;
             vartrix_jobids.push(jobid);
-            submitted += 1;
+            total += 1;
         }
 
         let dep = Some(vartrix_jobids.join(":"));
@@ -115,13 +130,14 @@ pub fn run(args: RunArgs) -> Result<()> {
                 .display()
                 .to_string(),
         };
-        let combine_jobid = submit(&combine_spec)?;
-        println!("submitted {} -> {}", combine_spec.job_name, combine_jobid);
-        submitted += 1;
+        let combine_jobid = dispatch(&combine_spec)?;
+        total += 1;
 
         for k in &ks {
             let outdir = vcf_base.join(format!("souporcell_{}", k));
-            fs::create_dir_all(&outdir)?;
+            if !dry_run {
+                fs::create_dir_all(&outdir)?;
+            }
             let cluster_spec = JobSpec {
                 job_name: format!("soup_{}_k{}", vcf.vcf_id, k),
                 partition: args.partition.clone(),
@@ -144,9 +160,8 @@ pub fn run(args: RunArgs) -> Result<()> {
                     .display()
                     .to_string(),
             };
-            let cluster_jobid = submit(&cluster_spec)?;
-            println!("submitted {} -> {}", cluster_spec.job_name, cluster_jobid);
-            submitted += 1;
+            let cluster_jobid = dispatch(&cluster_spec)?;
+            total += 1;
 
             let troublet_spec = JobSpec {
                 job_name: format!("troublet_{}_k{}", vcf.vcf_id, k),
@@ -167,13 +182,16 @@ pub fn run(args: RunArgs) -> Result<()> {
                     .display()
                     .to_string(),
             };
-            let tjob = submit(&troublet_spec)?;
-            println!("submitted {} -> {}", troublet_spec.job_name, tjob);
-            submitted += 1;
+            dispatch(&troublet_spec)?;
+            total += 1;
         }
     }
 
-    println!("Submitted {} jobs total.", submitted);
+    if dry_run {
+        println!("Dry run: {} job(s) would be submitted. Re-run with --submit to submit.", total);
+    } else {
+        println!("Submitted {} jobs total.", total);
+    }
     Ok(())
 }
 

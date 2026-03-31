@@ -12,6 +12,26 @@ pub struct JobSpec {
     pub log_path: String,
 }
 
+/// Format a JobSpec as the sbatch command line that would be executed.
+pub fn format_command(spec: &JobSpec) -> String {
+    let mut parts = vec![
+        "sbatch".to_string(),
+        "-n 1".to_string(),
+        format!("-c {}", spec.cpus),
+        format!("-p {}", spec.partition),
+        format!("--mem-per-cpu {}MB", spec.mem_mb),
+        format!("--job-name {}", spec.job_name),
+        format!("--output {}", spec.log_path),
+    ];
+
+    if let Some(dep) = &spec.dependency {
+        parts.push(format!("--dependency afterok:{}", dep));
+    }
+
+    parts.push(format!("--wrap '{}'", spec.command.replace('\'', "'\\''")));
+    parts.join(" \\\n  ")
+}
+
 pub fn submit(spec: &JobSpec) -> Result<String> {
     let mut cmd = Command::new("sbatch");
     cmd.arg("-n")
