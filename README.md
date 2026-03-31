@@ -2,7 +2,7 @@
 
 A Rust-first orchestrator for souporcell workflows on **Slurm clusters**. Supports grouped multi-BAM runs, multiple VCF panels, and pinned local builds for Rust tools.
 
-> **Slurm required.** souporcellx generates and submits jobs via `sbatch`. It is designed exclusively for HPC environments running the Slurm workload manager.
+> **Linux only.** souporcellx is designed exclusively for Linux HPC environments running the Slurm workload manager. It generates and submits jobs via `sbatch`.
 
 ## Requirements
 
