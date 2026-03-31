@@ -3,6 +3,7 @@ use crate::manifest::{read_sample_manifest, read_vcf_manifest, validate_sample_r
 use crate::slurm::{format_command, submit, JobSpec};
 use crate::toolchain;
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use which::which;
@@ -30,6 +31,7 @@ pub fn run(args: RunArgs) -> Result<()> {
     let vartrix = toolchain::resolve_binary("vartrix")?;
     let souporcell = toolchain::resolve_binary("souporcell")?;
     let troublet = toolchain::resolve_binary("troublet")?;
+    let self_bin = std::env::current_exe().context("cannot determine souporcellx binary path")?;
 
     let sample_rows = read_sample_manifest(&args.sample_manifest)?;
     let vcf_rows = read_vcf_manifest(&args.vcf_manifest)?;
@@ -51,8 +53,6 @@ pub fn run(args: RunArgs) -> Result<()> {
     let mut job_counter = 0usize;
     let mut total = 0usize;
 
-    // Helper: either submit the job or print the sbatch command (dry run).
-    // Returns a job ID string (real from sbatch, or a placeholder for dry run).
     let mut dispatch = |spec: &JobSpec| -> Result<String> {
         if dry_run {
             println!("{}\n", format_command(spec));
@@ -72,7 +72,10 @@ pub fn run(args: RunArgs) -> Result<()> {
             fs::create_dir_all(&logdir)?;
         }
 
-        let mut vartrix_jobids = Vec::new();
+        // Track vartrix jobs and output dirs per group.
+        // Each entry: (jobid, output_dir, barcode_prefix)
+        let mut groups: BTreeMap<&str, Vec<(String, String, String)>> = BTreeMap::new();
+
         for row in &sample_rows {
             let bam_base = row
                 .bam
@@ -110,80 +113,109 @@ pub fn run(args: RunArgs) -> Result<()> {
                     .to_string(),
             };
             let jobid = dispatch(&spec)?;
-            vartrix_jobids.push(jobid);
+            groups
+                .entry(row.group_id.as_str())
+                .or_default()
+                .push((
+                    jobid,
+                    row_out.display().to_string(),
+                    row.barcode_prefix().to_string(),
+                ));
             total += 1;
         }
 
-        let dep = Some(vartrix_jobids.join(":"));
-        let combine_spec = JobSpec {
-            job_name: format!("combine_{}", vcf.vcf_id),
-            partition: args.partition.clone(),
-            cpus: 4,
-            mem_mb: args.light_mem_mb,
-            dependency: dep,
-            command: format!(
-                "echo TODO: collapse and combine grouped matrices for {}",
-                shell_escape(vcf.vcf_id.clone())
-            ),
-            log_path: logdir
-                .join(format!("combine_{}.log", vcf.vcf_id))
-                .display()
-                .to_string(),
-        };
-        let combine_jobid = dispatch(&combine_spec)?;
-        total += 1;
+        // For each group: combine, then souporcell + troublet per K.
+        for (group_id, entries) in &groups {
+            let combined_dir = vcf_base.join("combined").join(group_id);
 
-        for k in &ks {
-            let outdir = vcf_base.join(format!("souporcell_{}", k));
-            if !dry_run {
-                fs::create_dir_all(&outdir)?;
-            }
-            let cluster_spec = JobSpec {
-                job_name: format!("soup_{}_k{}", vcf.vcf_id, k),
-                partition: args.partition.clone(),
-                cpus: args.souporcell_threads,
-                mem_mb: args.heavy_mem_mb,
-                dependency: Some(combine_jobid.clone()),
-                command: format!(
-                    "{} -a {} -r {} -b {} -k {} -t {} > {} 2> {}",
-                    shell_escape(souporcell.display().to_string()),
-                    shell_escape(vcf_base.join("combined").join("GROUP").join("alt.mtx").display().to_string()),
-                    shell_escape(vcf_base.join("combined").join("GROUP").join("ref.mtx").display().to_string()),
-                    shell_escape(vcf_base.join("combined").join("GROUP").join("barcodes.tsv").display().to_string()),
-                    k,
-                    args.souporcell_threads,
-                    shell_escape(outdir.join("clusters_tmp.tsv").display().to_string()),
-                    shell_escape(outdir.join("log.tsv").display().to_string()),
-                ),
-                log_path: logdir
-                    .join(format!("soup_{}_k{}.log", vcf.vcf_id, k))
-                    .display()
-                    .to_string(),
-            };
-            let cluster_jobid = dispatch(&cluster_spec)?;
-            total += 1;
+            let vartrix_jobids: Vec<&str> = entries.iter().map(|(id, _, _)| id.as_str()).collect();
+            let input_args: String = entries
+                .iter()
+                .map(|(_, dir, _)| shell_escape(dir.clone()))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let label_args: String = entries
+                .iter()
+                .map(|(_, _, prefix)| shell_escape(prefix.clone()))
+                .collect::<Vec<_>>()
+                .join(" ");
 
-            let troublet_spec = JobSpec {
-                job_name: format!("troublet_{}_k{}", vcf.vcf_id, k),
+            let combine_cmd = format!(
+                "{} combine --inputs {} --labels {} --output {}",
+                shell_escape(self_bin.display().to_string()),
+                input_args,
+                label_args,
+                shell_escape(combined_dir.display().to_string()),
+            );
+
+            let dep = Some(vartrix_jobids.join(":"));
+            let combine_spec = JobSpec {
+                job_name: format!("combine_{}_{}", vcf.vcf_id, group_id),
                 partition: args.partition.clone(),
-                cpus: 1,
+                cpus: 4,
                 mem_mb: args.light_mem_mb,
-                dependency: Some(cluster_jobid),
-                command: format!(
-                    "{} -a {} -r {} --clusters {} > {}",
-                    shell_escape(troublet.display().to_string()),
-                    shell_escape(vcf_base.join("combined").join("GROUP").join("alt.mtx").display().to_string()),
-                    shell_escape(vcf_base.join("combined").join("GROUP").join("ref.mtx").display().to_string()),
-                    shell_escape(outdir.join("clusters_tmp.tsv").display().to_string()),
-                    shell_escape(outdir.join("clusters.tsv").display().to_string()),
-                ),
+                dependency: dep,
+                command: combine_cmd,
                 log_path: logdir
-                    .join(format!("troublet_{}_k{}.log", vcf.vcf_id, k))
+                    .join(format!("combine_{}_{}.log", vcf.vcf_id, group_id))
                     .display()
                     .to_string(),
             };
-            dispatch(&troublet_spec)?;
+            let combine_jobid = dispatch(&combine_spec)?;
             total += 1;
+
+            for k in &ks {
+                let outdir = vcf_base.join(format!("souporcell_{}", k)).join(group_id);
+                if !dry_run {
+                    fs::create_dir_all(&outdir)?;
+                }
+                let cluster_spec = JobSpec {
+                    job_name: format!("soup_{}_{}_k{}", vcf.vcf_id, group_id, k),
+                    partition: args.partition.clone(),
+                    cpus: args.souporcell_threads,
+                    mem_mb: args.heavy_mem_mb,
+                    dependency: Some(combine_jobid.clone()),
+                    command: format!(
+                        "{} -a {} -r {} -b {} -k {} -t {} > {} 2> {}",
+                        shell_escape(souporcell.display().to_string()),
+                        shell_escape(combined_dir.join("alt.mtx").display().to_string()),
+                        shell_escape(combined_dir.join("ref.mtx").display().to_string()),
+                        shell_escape(combined_dir.join("barcodes.tsv").display().to_string()),
+                        k,
+                        args.souporcell_threads,
+                        shell_escape(outdir.join("clusters_tmp.tsv").display().to_string()),
+                        shell_escape(outdir.join("log.tsv").display().to_string()),
+                    ),
+                    log_path: logdir
+                        .join(format!("soup_{}_{}_k{}.log", vcf.vcf_id, group_id, k))
+                        .display()
+                        .to_string(),
+                };
+                let cluster_jobid = dispatch(&cluster_spec)?;
+                total += 1;
+
+                let troublet_spec = JobSpec {
+                    job_name: format!("troublet_{}_{}_k{}", vcf.vcf_id, group_id, k),
+                    partition: args.partition.clone(),
+                    cpus: 1,
+                    mem_mb: args.light_mem_mb,
+                    dependency: Some(cluster_jobid),
+                    command: format!(
+                        "{} -a {} -r {} --clusters {} > {}",
+                        shell_escape(troublet.display().to_string()),
+                        shell_escape(combined_dir.join("alt.mtx").display().to_string()),
+                        shell_escape(combined_dir.join("ref.mtx").display().to_string()),
+                        shell_escape(outdir.join("clusters_tmp.tsv").display().to_string()),
+                        shell_escape(outdir.join("clusters.tsv").display().to_string()),
+                    ),
+                    log_path: logdir
+                        .join(format!("troublet_{}_{}_k{}.log", vcf.vcf_id, group_id, k))
+                        .display()
+                        .to_string(),
+                };
+                dispatch(&troublet_spec)?;
+                total += 1;
+            }
         }
     }
 

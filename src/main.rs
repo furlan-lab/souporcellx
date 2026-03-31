@@ -1,4 +1,5 @@
 mod cli;
+mod combine;
 mod manifest;
 mod paths;
 mod pipeline;
@@ -18,6 +19,22 @@ fn main() -> Result<()> {
             ToolCommands::Bootstrap => toolchain::bootstrap(),
             ToolCommands::Show => toolchain::show(),
         },
+        Commands::Manifest {
+            cellranger_dirs,
+            group_id,
+            prefixes,
+            output,
+        } => manifest::generate_manifest_from_cellranger(
+            &cellranger_dirs,
+            &group_id,
+            prefixes.as_deref(),
+            output.as_deref(),
+        ),
+        Commands::Combine {
+            inputs,
+            labels,
+            output,
+        } => combine::combine_matrices(&inputs, &labels, &output),
         Commands::Validate {
             sample_manifest,
             vcf_manifest,

@@ -17,5 +17,5 @@ pub fn tool_root() -> Result<PathBuf> {
 }
 
 pub fn registry_file() -> Result<PathBuf> {
-    Ok(tool_root()?.join("registry.tsv"))
+    Ok(tool_root()?.join("registry.csv"))
 }

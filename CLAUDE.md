@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-souporcellx is a Rust CLI that orchestrates souporcell single-cell genotype demultiplexing workflows on **Slurm clusters**. It manages vendored tool builds, validates TSV input manifests, and submits multi-stage Slurm job DAGs with proper dependency chains. It requires `sbatch`, `minimap2`, and `freebayes` on the cluster PATH.
+souporcellx is a Rust CLI that orchestrates souporcell single-cell genotype demultiplexing workflows on **Slurm clusters**. It manages vendored tool builds, validates CSV input manifests, and submits multi-stage Slurm job DAGs with proper dependency chains. It requires `sbatch`, `minimap2`, and `freebayes` on the cluster PATH.
 
 ## Build & Install
 
@@ -22,8 +22,8 @@ souporcellx tools fetch        # Clone upstream vartrix & souporcell repos into 
 souporcellx tools bootstrap    # Build vendored tools from source
 souporcellx tools update       # Pull latest upstream sources and rebuild
 souporcellx tools show         # Print managed tool paths
-souporcellx validate --sample-manifest samples.tsv --vcf-manifest vcfs.tsv
-souporcellx run --sample-manifest samples.tsv --vcf-manifest vcfs.tsv \
+souporcellx validate --sample-manifest samples.csv --vcf-manifest vcfs.csv
+souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv \
     --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 [--submit]
 ```
 
@@ -34,8 +34,8 @@ The `run` command is **dry-run by default**, printing every sbatch command; pass
 Six modules behind a single `main.rs` entry point:
 
 - **cli** — clap derive-based CLI definition (`Cli`, `Commands`, `RunArgs`)
-- **manifest** — TSV parsing/validation for sample manifests (group_id, library_id, mode, bam, barcodes) and VCF manifests (vcf_id, vcf_path)
-- **toolchain** — Fetches, builds, and updates vendored Rust binaries from `vendor/` into `~/.cache/souporcellx/tools/`, writes a registry TSV, and resolves binary paths at runtime
+- **manifest** — CSV parsing/validation for sample manifests (group_id, library_id, bam, barcodes) and VCF manifests (vcf_id, vcf_path)
+- **toolchain** — Fetches, builds, and updates vendored Rust binaries from `vendor/` into `~/.cache/souporcellx/tools/`, writes a registry CSV, and resolves binary paths at runtime
 - **pipeline** — Orchestrates the Slurm job DAG: validates inputs, resolves tools, then submits jobs
 - **slurm** — Thin wrapper around `sbatch` for job submission
 - **paths** — Cache directory and registry file path helpers

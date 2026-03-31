@@ -23,6 +23,33 @@ pub enum Commands {
         #[arg(long)]
         vcf_manifest: PathBuf,
     },
+    /// Generate a sample manifest from Cell Ranger output directories.
+    Manifest {
+        /// One or more Cell Ranger output directories.
+        #[arg(long, required = true, num_args = 1..)]
+        cellranger_dirs: Vec<PathBuf>,
+        /// Group ID for all samples (defaults to "group1").
+        #[arg(long, default_value = "group1")]
+        group_id: String,
+        /// Barcode prefixes (one per sample). If omitted, library_id is used.
+        #[arg(long, num_args = 1..)]
+        prefixes: Option<Vec<String>>,
+        /// Write output to a file instead of stdout.
+        #[arg(long)]
+        output: Option<PathBuf>,
+    },
+    /// Combine vartrix output matrices across samples (used internally by the pipeline).
+    Combine {
+        /// Vartrix output directories to combine.
+        #[arg(long, required = true, num_args = 1..)]
+        inputs: Vec<PathBuf>,
+        /// Label for each input (used as barcode prefix). Must match number of inputs.
+        #[arg(long, required = true, num_args = 1..)]
+        labels: Vec<String>,
+        /// Output directory for combined matrices.
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Submit or print the workflow plan.
     Run(RunArgs),
 }

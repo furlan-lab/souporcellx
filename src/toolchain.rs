@@ -138,7 +138,7 @@ pub fn show() -> Result<()> {
         return Ok(());
     }
     for rec in registry {
-        println!("{}\t{}\t{}", rec.name, rec.binary_path, rec.source_path);
+        println!("{}  {}  {}", rec.name, rec.binary_path, rec.source_path);
     }
     Ok(())
 }
@@ -181,7 +181,7 @@ fn build_cargo_bin(src: &Path, bin_name: &str, root: &Path) -> Result<PathBuf> {
 fn write_registry(records: &[ToolRecord]) -> Result<()> {
     let path = paths::registry_file()?;
     let mut wtr = csv::WriterBuilder::new()
-        .delimiter(b'\t')
+        .delimiter(b',')
         .from_path(&path)
         .with_context(|| format!("failed to open {} for writing", path.display()))?;
     for rec in records {
@@ -197,7 +197,7 @@ fn read_registry() -> Result<Vec<ToolRecord>> {
         return Ok(Vec::new());
     }
     let mut rdr = csv::ReaderBuilder::new()
-        .delimiter(b'\t')
+        .delimiter(b',')
         .from_path(&path)
         .with_context(|| format!("failed to open registry {}", path.display()))?;
     let mut out = Vec::new();
