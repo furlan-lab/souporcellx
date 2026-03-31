@@ -29,6 +29,10 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum ToolCommands {
+    /// Clone upstream vartrix and souporcell repos into vendor/.
+    Fetch,
+    /// Pull latest upstream sources and rebuild.
+    Update,
     /// Build vendored vartrix, souporcell, and troublet from source.
     Bootstrap,
     /// Print discovered managed tool paths.

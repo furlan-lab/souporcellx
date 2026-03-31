@@ -20,10 +20,22 @@ It expects these to already exist on the cluster `PATH`:
 cargo install --path .
 ```
 
+## Quick start
+
+```bash
+cargo install --path .
+souporcellx tools fetch       # clone upstream vartrix & souporcell repos into vendor/
+souporcellx tools bootstrap   # build vendored tools from source
+souporcellx run --sample-manifest samples.tsv --vcf-manifest vcfs.tsv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
+```
+
 ## Commands
 
 ```bash
-souporcellx tools bootstrap
+souporcellx tools fetch       # clone upstream repos into vendor/
+souporcellx tools bootstrap   # build vendored tools from source
+souporcellx tools update      # pull latest sources and rebuild
+souporcellx tools show        # print managed tool paths
 souporcellx validate --sample-manifest samples.tsv --vcf-manifest vcfs.tsv
 souporcellx run --sample-manifest samples.tsv --vcf-manifest vcfs.tsv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
 ```
@@ -48,23 +60,18 @@ kg1k	/path/filtered_2p_1kgenomes_chr.vcf
 common_highconf	/path/common_highconf.vcf
 ```
 
-## Vendoring upstream sources
+## Vendored tools
 
-The expected layout is:
+`tools fetch` clones the upstream repositories into `vendor/`:
 
 ```text
 vendor/
-  vartrix/
-  souporcell/
+  vartrix/                          # 10XGenomics/vartrix
+  souporcell/                       # wheaton5/souporcell
+    souporcell/                     #   souporcell Rust crate
+    troublet/                       #   troublet Rust crate
 ```
 
-Where:
-- `vendor/vartrix` is the upstream VarTrix repository root.
-- `vendor/souporcell` is the upstream Souporcell repository root containing `souporcell/` and `troublet/` Rust subdirectories.
+`tools bootstrap` builds release binaries and registers them under the local cache directory (`~/.cache/souporcellx/tools/`).
 
-`tools bootstrap` will build:
-- `vendor/vartrix`
-- `vendor/souporcell/souporcell`
-- `vendor/souporcell/troublet`
-
-and write a small registry file under the local cache directory.
+`tools update` pulls the latest from both repos and rebuilds.

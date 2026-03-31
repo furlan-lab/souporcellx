@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use which::which;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ToolRecord {
@@ -13,13 +12,82 @@ struct ToolRecord {
     source_path: String,
 }
 
-pub fn bootstrap() -> Result<()> {
-    for exe in ["minimap2", "freebayes"] {
-        which(exe).with_context(|| format!("required external tool not found on PATH: {}", exe))?;
+const VARTRIX_REPO: &str = "https://github.com/10XGenomics/vartrix.git";
+const SOUPORCELL_REPO: &str = "https://github.com/wheaton5/souporcell.git";
+
+fn vendor_dir() -> Result<PathBuf> {
+    let repo_root = std::env::current_dir().context("failed to read current directory")?;
+    Ok(repo_root.join("vendor"))
+}
+
+fn git_clone(url: &str, dest: &Path) -> Result<()> {
+    println!("Cloning {} -> {}", url, dest.display());
+    let status = Command::new("git")
+        .args(["clone", url])
+        .arg(dest)
+        .status()
+        .with_context(|| format!("failed to run git clone {}", url))?;
+    if !status.success() {
+        bail!("git clone failed for {}", url);
+    }
+    Ok(())
+}
+
+fn git_pull(repo: &Path) -> Result<()> {
+    println!("Pulling latest in {}", repo.display());
+    let status = Command::new("git")
+        .args(["pull"])
+        .current_dir(repo)
+        .status()
+        .with_context(|| format!("failed to run git pull in {}", repo.display()))?;
+    if !status.success() {
+        bail!("git pull failed in {}", repo.display());
+    }
+    Ok(())
+}
+
+pub fn fetch() -> Result<()> {
+    let vendor = vendor_dir()?;
+    fs::create_dir_all(&vendor)
+        .with_context(|| format!("failed to create {}", vendor.display()))?;
+
+    let vartrix_src = vendor.join("vartrix");
+    let soup_src = vendor.join("souporcell");
+
+    if vartrix_src.exists() {
+        println!("vendor/vartrix already exists, skipping (use `tools update` to pull latest)");
+    } else {
+        git_clone(VARTRIX_REPO, &vartrix_src)?;
     }
 
-    let repo_root = std::env::current_dir().context("failed to read current directory")?;
-    let vendor = repo_root.join("vendor");
+    if soup_src.exists() {
+        println!("vendor/souporcell already exists, skipping (use `tools update` to pull latest)");
+    } else {
+        git_clone(SOUPORCELL_REPO, &soup_src)?;
+    }
+
+    println!("\nFetch complete. Run `souporcellx tools bootstrap` to build.");
+    Ok(())
+}
+
+pub fn update() -> Result<()> {
+    let vendor = vendor_dir()?;
+    let vartrix_src = vendor.join("vartrix");
+    let soup_src = vendor.join("souporcell");
+
+    if !vartrix_src.exists() || !soup_src.exists() {
+        bail!("vendor sources not found. Run `souporcellx tools fetch` first.");
+    }
+
+    git_pull(&vartrix_src)?;
+    git_pull(&soup_src)?;
+
+    println!("\nSources updated. Rebuilding...\n");
+    bootstrap()
+}
+
+pub fn bootstrap() -> Result<()> {
+    let vendor = vendor_dir()?;
     let vartrix_src = vendor.join("vartrix");
     let soup_src = vendor.join("souporcell");
     let souporcell_rust = soup_src.join("souporcell");
@@ -27,7 +95,10 @@ pub fn bootstrap() -> Result<()> {
 
     for p in [&vartrix_src, &souporcell_rust, &troublet_rust] {
         if !p.exists() {
-            bail!("missing vendored source directory: {}", p.display());
+            bail!(
+                "missing vendored source directory: {}. Run `souporcellx tools fetch` first.",
+                p.display()
+            );
         }
     }
 

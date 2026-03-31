@@ -18,14 +18,16 @@ cargo clippy               # Lint
 
 Key CLI subcommands:
 ```bash
-souporcellx tools bootstrap    # Build vendored tools (vartrix, souporcell, troublet)
+souporcellx tools fetch        # Clone upstream vartrix & souporcell repos into vendor/
+souporcellx tools bootstrap    # Build vendored tools from source
+souporcellx tools update       # Pull latest upstream sources and rebuild
 souporcellx tools show         # Print managed tool paths
 souporcellx validate --sample-manifest samples.tsv --vcf-manifest vcfs.tsv
 souporcellx run --sample-manifest samples.tsv --vcf-manifest vcfs.tsv \
     --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 [--submit]
 ```
 
-The `run` command is **dry-run by default**; pass `--submit` to actually submit Slurm jobs.
+The `run` command is **dry-run by default**, printing every sbatch command; pass `--submit` to actually submit Slurm jobs.
 
 ## Architecture
 
@@ -33,7 +35,7 @@ Six modules behind a single `main.rs` entry point:
 
 - **cli** — clap derive-based CLI definition (`Cli`, `Commands`, `RunArgs`)
 - **manifest** — TSV parsing/validation for sample manifests (group_id, library_id, mode, bam, barcodes) and VCF manifests (vcf_id, vcf_path)
-- **toolchain** — Builds vendored Rust binaries from `vendor/` into `~/.cache/souporcellx/tools/`, writes a registry TSV, and resolves binary paths at runtime
+- **toolchain** — Fetches, builds, and updates vendored Rust binaries from `vendor/` into `~/.cache/souporcellx/tools/`, writes a registry TSV, and resolves binary paths at runtime
 - **pipeline** — Orchestrates the Slurm job DAG: validates inputs, resolves tools, then submits jobs
 - **slurm** — Thin wrapper around `sbatch` for job submission
 - **paths** — Cache directory and registry file path helpers
@@ -60,7 +62,7 @@ vendor/
     troublet/                       # troublet Rust crate
 ```
 
-`tools bootstrap` runs `cargo build --release` in each and copies binaries to the cache.
+`tools fetch` clones upstream repos, `tools bootstrap` builds them, `tools update` pulls latest and rebuilds.
 
 ## External Dependencies (must be on PATH)
 
