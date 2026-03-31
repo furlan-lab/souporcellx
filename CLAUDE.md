@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-souporcellx is a Rust CLI that orchestrates souporcell single-cell genotype demultiplexing workflows. It manages vendored tool builds, validates TSV input manifests, and submits multi-stage Slurm job DAGs with proper dependency chains.
+souporcellx is a Rust CLI that orchestrates souporcell single-cell genotype demultiplexing workflows on **Slurm clusters**. It manages vendored tool builds, validates TSV input manifests, and submits multi-stage Slurm job DAGs with proper dependency chains. It requires `sbatch`, `minimap2`, and `freebayes` on the cluster PATH.
 
 ## Build & Install
 

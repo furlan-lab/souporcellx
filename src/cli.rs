@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(name = "souporcellx")]
-#[command(about = "Rust-first souporcell workflow orchestrator")]
+#[command(about = "Souporcell workflow orchestrator for Slurm clusters")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

@@ -1,18 +1,15 @@
 # souporcellx
 
-A Rust-first orchestrator for souporcell workflows with grouped multi-BAM support, multiple VCF panels, and pinned local builds for Rust tools.
+A Rust-first orchestrator for souporcell workflows on **Slurm clusters**. Supports grouped multi-BAM runs, multiple VCF panels, and pinned local builds for Rust tools.
 
-## Opinionated design
+> **Slurm required.** souporcellx generates and submits jobs via `sbatch`. It is designed exclusively for HPC environments running the Slurm workload manager.
 
-This package manages local builds of:
-- `vartrix`
-- `souporcell`
-- `troublet`
+## Requirements
 
-It expects these to already exist on the cluster `PATH`:
+The following must be available on the cluster `PATH`:
 - `minimap2`
 - `freebayes`
-- `sbatch` when using submission mode
+- `sbatch` (Slurm)
 
 ## Install
 

@@ -2,7 +2,7 @@
 name = "souporcellx"
 version = "0.1.0"
 edition = "2021"
-description = "Rust-first souporcell workflow orchestrator for grouped multi-BAM runs"
+description = "Souporcell workflow orchestrator for Slurm clusters with grouped multi-BAM support"
 license = "MIT"
 
 [dependencies]
