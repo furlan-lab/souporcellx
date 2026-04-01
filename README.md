@@ -71,9 +71,13 @@ The `filter-vcf` subcommand can also be used standalone outside the pipeline:
 souporcellx filter-vcf --vcf common_variants.vcf --bams sample1.bam sample2.bam --min-cov 20 --output filtered.vcf
 
 ## real test
-
+export id=AML_MRD_DL3
+export wd="/hpc/temp/furlan_s/${id}"
+mergename="merge_R1D2R2D1_oldwf"
+export OUT=${wd}/${mergename}
+cd $OUT
 VCF=/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
-BAM=/hpc/temp/furlan_s/AML_MRD_DL3/merge_R1D2R2D1_oldwf/out_bam.bam
+BAM=/hpc/temp/furlan_s/AML_MRD_DL3/merge_R1D2R2D1_oldwf/out.sorted.bam
 souporcellx filter-vcf --vcf $VCF --bams $BAM --min-cov 20 --output filtered.vcf
 ```
 
