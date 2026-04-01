@@ -110,18 +110,18 @@ souporcellx manifest --cellranger-dirs /path/to/sample1 /path/to/sample2 \
 
 
 #REAL EXAMPLE
-ROOT=/hpc/temp/furlan_s/AML_MRD_DL3
-GROUPID=merge_R1D2R2D1
+ROOT=/home/sfurlan/develop/souporcellx/data
+GROUPID=toy
 mkdir -p $ROOT/$GROUPID
 cd $ROOT/$GROUPID
 
 REF=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2024-A/fasta/genome.fa
-souporcellx manifest --cellranger-dirs $ROOT/AML_MRD_R1_D2_A1 $ROOT/AML_MRD_R1_D2_A2 $ROOT/AML_MRD_R1_D2_B1 $ROOT/AML_MRD_R2_D1_B2 --group-id $GROUPID --output sample_mani.csv
 
-cat > vcfs.csv << 'EOL'
-vcf_id,vcf_path
-kg1k,/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
-kg1k_deep,/hpc/temp/furlan_s/AML_MRD_DL3/merged_vcf/common_variants_grch38_1kg30x_maf2pct.vcf.gz
+
+cat > sample_mani.csv << 'EOL'
+group_id,library_id,bam,barcodes,prefix
+merge_p1p2,AML_MRD_R1_D2_A1,/path/sample1.bam,/path/barcodes1.tsv.gz,AML_MRD_R1_D2_A1_
+merge_p1p2,AML_MRD_R2_D1_B2,/path/sample2.bam,/path/barcodes2.tsv.gz,AML_MRD_R2_D1_B2_
 EOL
 
 cat > vcfs.csv << 'EOL'
@@ -137,6 +137,17 @@ souporcellx run --sample-manifest sample_mani.csv \
                 --ref $REF \
                 --submit
 
+
+# souporcellx manifest --cellranger-dirs $ROOT/AML_MRD_R1_D2_A1 $ROOT/AML_MRD_R1_D2_A2 $ROOT/AML_MRD_R1_D2_B1 $ROOT/AML_MRD_R2_D1_B2 --group-id $GROUPID --output sample_mani.csv
+
+# cat > vcfs.csv << 'EOL'
+# vcf_id,vcf_path
+# kg1k,/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
+# kg1k_deep,/hpc/temp/furlan_s/AML_MRD_DL3/merged_vcf/common_variants_grch38_1kg30x_maf2pct.vcf.gz
+# EOL
+
+
+
 ```
 
 ## REMOVE THIS 
@@ -145,6 +156,62 @@ Will run old implementation of souporcell with mergebams to compare results with
 
 ```sh
 
+### Create toy dataset for souporcellx
+screen
+
+grabnode
+24
+200
+7
+N
+
+cd ~/develop/souporcellx
+ml R/4.4.2-gfbf-2024a
+R
+```
+
+
+```R
+
+
+#devtools::install_github("furlan-lab/mergebamsR")
+library(mergebamsR)
+
+bam1 <- "/fh/working/furlan_s/AML_MRD/AML_MRD1/AML_MRD_R1_D2_A1/outs/per_sample_outs/AML_MRD_R1_D2_A1/count/sample_alignments.bam"
+bam2 <- "/fh/working/furlan_s/AML_MRD/AML_MRD1/AML_MRD_R2_D1_B2/outs/per_sample_outs/AML_MRD_R2_D1_B2/count/sample_alignments.bam"
+
+cbs <- read.table("data/good_cb.tsv")$x
+
+#subset to 500 cells
+cbs1 <- cbs[grep("AML_MRD_R1_D2_A1", cbs)]
+cbs2 <- cbs[grep("AML_MRD_R2_D1_B2", cbs)]
+
+cbs1 <- cbs1[sample(1:length(cbs1), 250)]
+cbs2 <- cbs2[sample(1:length(cbs2), 250)]
+
+right <- function(x, n) substr(x, nchar(x) - n + 1, nchar(x))
+cbs1 <- right(cbs1, 18)
+cbs2 <- right(cbs2, 18)
+
+
+subsetbam(inputbam = bam1, outputbams = "data/toy1.bam", features = list(cbs1), cores=24, split_bam = TRUE)
+subsetbam(inputbam = bam2, outputbams = "data/toy2.bam", features = list(cbs2), cores=24, split_bam = TRUE)
+
+write.table(data.frame(cbs1), gzfile("data/barcodes1.tsv.gz"), col.names = FALSE, row.names = FALSE, quote = FALSE)
+write.table(data.frame(cbs2), gzfile("data/barcodes2.tsv.gz"), col.names = FALSE, row.names = FALSE, quote = FALSE)
+
+q()
+N
+```
+
+```sh
+
+
+
+
+```
+
+```sh
 #####SOUPORCELL after cellranger complete######
 ml Singularity/3.5.3
 ml Python/3.9.6-GCCcore-11.2.0

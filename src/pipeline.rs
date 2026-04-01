@@ -152,7 +152,7 @@ pub fn run(args: RunArgs) -> Result<()> {
             };
 
             let cmd = format!(
-                "{} --bam {} --cell-barcodes {} --vcf {} --fasta {} --out-matrix {} --ref-matrix {} --out-barcodes {}",
+                "{} --bam {} --cell-barcodes {} --vcf {} --fasta {} --scoring-method coverage --out-matrix {} --ref-matrix {} --out-barcodes {}",
                 shell_escape(vartrix.display().to_string()),
                 shell_escape(row.bam.display().to_string()),
                 shell_escape(row.barcodes.display().to_string()),
