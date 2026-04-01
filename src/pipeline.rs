@@ -65,11 +65,64 @@ pub fn run(args: RunArgs) -> Result<()> {
         }
     };
 
+    let use_coverage_filter = !args.skip_coverage_filter;
+    let min_cov = args.min_alt + args.min_ref;
+
+    // Pre-collect group -> sample rows for filter job generation.
+    let mut group_samples: BTreeMap<&str, Vec<&crate::manifest::SampleRow>> = BTreeMap::new();
+    for row in &sample_rows {
+        group_samples.entry(row.group_id.as_str()).or_default().push(row);
+    }
+
     for vcf in &vcf_rows {
         let vcf_base = args.workdir.join(&vcf.vcf_id);
         let logdir = vcf_base.join("logs");
         if !dry_run {
             fs::create_dir_all(&logdir)?;
+        }
+
+        // Submit coverage filter jobs per group (before vartrix).
+        // Maps group_id -> (filter_jobid, filtered_vcf_path)
+        let mut filter_jobs: BTreeMap<&str, (String, String)> = BTreeMap::new();
+        if use_coverage_filter {
+            for (group_id, rows) in &group_samples {
+                let filter_dir = vcf_base.join("filtered").join(group_id);
+                if !dry_run {
+                    fs::create_dir_all(&filter_dir)?;
+                }
+                let filtered_vcf = filter_dir.join("filtered.vcf");
+
+                let bam_args: String = rows
+                    .iter()
+                    .map(|r| shell_escape(r.bam.display().to_string()))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                let filter_cmd = format!(
+                    "{} filter-vcf --vcf {} --bams {} --min-cov {} --output {}",
+                    shell_escape(self_bin.display().to_string()),
+                    shell_escape(vcf.vcf_path.display().to_string()),
+                    bam_args,
+                    min_cov,
+                    shell_escape(filtered_vcf.display().to_string()),
+                );
+
+                let filter_spec = JobSpec {
+                    job_name: format!("covfilt_{}_{}", vcf.vcf_id, group_id),
+                    partition: args.partition.clone(),
+                    cpus: 4,
+                    mem_mb: args.light_mem_mb,
+                    dependency: None,
+                    command: filter_cmd,
+                    log_path: logdir
+                        .join(format!("covfilt_{}_{}.log", vcf.vcf_id, group_id))
+                        .display()
+                        .to_string(),
+                };
+                let filter_jobid = dispatch(&filter_spec)?;
+                filter_jobs.insert(group_id, (filter_jobid, filtered_vcf.display().to_string()));
+                total += 1;
+            }
         }
 
         // Track vartrix jobs and output dirs per group.
@@ -89,23 +142,38 @@ pub fn run(args: RunArgs) -> Result<()> {
                 fs::create_dir_all(&row_out)?;
             }
 
+            // Use filtered VCF if coverage filtering is enabled, otherwise raw VCF.
+            let vcf_path_for_vartrix = if let Some((_, ref filtered_path)) =
+                filter_jobs.get(row.group_id.as_str())
+            {
+                filtered_path.clone()
+            } else {
+                vcf.vcf_path.display().to_string()
+            };
+
             let cmd = format!(
                 "{} --bam {} --cell-barcodes {} --vcf {} --fasta {} --out-matrix {} --ref-matrix {} --out-barcodes {}",
                 shell_escape(vartrix.display().to_string()),
                 shell_escape(row.bam.display().to_string()),
                 shell_escape(row.barcodes.display().to_string()),
-                shell_escape(vcf.vcf_path.display().to_string()),
+                shell_escape(vcf_path_for_vartrix),
                 shell_escape(args.r#ref.display().to_string()),
                 shell_escape(row_out.join("alt.mtx").display().to_string()),
                 shell_escape(row_out.join("ref.mtx").display().to_string()),
                 shell_escape(row_out.join("barcodes.tsv").display().to_string()),
             );
+
+            // Vartrix depends on the coverage filter job for its group (if present).
+            let vartrix_dep = filter_jobs
+                .get(row.group_id.as_str())
+                .map(|(jobid, _)| jobid.clone());
+
             let spec = JobSpec {
                 job_name: format!("vtx_{}_{}_{}", vcf.vcf_id, row.library_id, bam_base),
                 partition: args.partition.clone(),
                 cpus: args.vartrix_threads,
                 mem_mb: args.heavy_mem_mb,
-                dependency: None,
+                dependency: vartrix_dep,
                 command: cmd,
                 log_path: logdir
                     .join(format!("vtx_{}_{}_{}.log", vcf.vcf_id, row.library_id, bam_base))
@@ -176,13 +244,15 @@ pub fn run(args: RunArgs) -> Result<()> {
                     mem_mb: args.heavy_mem_mb,
                     dependency: Some(combine_jobid.clone()),
                     command: format!(
-                        "{} -a {} -r {} -b {} -k {} -t {} > {} 2> {}",
+                        "{} -a {} -r {} -b {} -k {} -t {} --min_alt {} --min_ref {} > {} 2> {}",
                         shell_escape(souporcell.display().to_string()),
                         shell_escape(combined_dir.join("alt.mtx").display().to_string()),
                         shell_escape(combined_dir.join("ref.mtx").display().to_string()),
                         shell_escape(combined_dir.join("barcodes.tsv").display().to_string()),
                         k,
                         args.souporcell_threads,
+                        args.min_alt,
+                        args.min_ref,
                         shell_escape(outdir.join("clusters_tmp.tsv").display().to_string()),
                         shell_escape(outdir.join("log.tsv").display().to_string()),
                     ),

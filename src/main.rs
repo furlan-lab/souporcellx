@@ -1,5 +1,6 @@
 mod cli;
 mod combine;
+mod filter_vcf;
 mod manifest;
 mod paths;
 mod pipeline;
@@ -30,6 +31,12 @@ fn main() -> Result<()> {
             prefixes.as_deref(),
             output.as_deref(),
         ),
+        Commands::FilterVcf {
+            vcf,
+            bams,
+            min_cov,
+            output,
+        } => filter_vcf::filter_vcf(&vcf, &bams, min_cov, &output),
         Commands::Combine {
             inputs,
             labels,

@@ -50,6 +50,21 @@ pub enum Commands {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Filter a VCF to retain only variants with sufficient BAM coverage (used internally by the pipeline).
+    FilterVcf {
+        /// Input VCF file (plain or gzipped).
+        #[arg(long)]
+        vcf: PathBuf,
+        /// BAM files to compute coverage from (must be indexed).
+        #[arg(long, required = true, num_args = 1..)]
+        bams: Vec<PathBuf>,
+        /// Minimum combined read depth to retain a variant.
+        #[arg(long, default_value_t = 20)]
+        min_cov: u32,
+        /// Output filtered VCF path.
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Submit or print the workflow plan.
     Run(RunArgs),
 }
@@ -90,4 +105,13 @@ pub struct RunArgs {
     pub light_mem_mb: u32,
     #[arg(long, default_value_t = false)]
     pub submit: bool,
+    /// Minimum alt read depth for coverage filtering and souporcell clustering.
+    #[arg(long, default_value_t = 10)]
+    pub min_alt: u32,
+    /// Minimum ref read depth for coverage filtering and souporcell clustering.
+    #[arg(long, default_value_t = 10)]
+    pub min_ref: u32,
+    /// Skip VCF coverage filtering (pass raw VCFs directly to vartrix).
+    #[arg(long, default_value_t = false)]
+    pub skip_coverage_filter: bool,
 }

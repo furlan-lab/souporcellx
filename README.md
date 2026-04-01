@@ -10,6 +10,7 @@ The following must be available on the cluster `PATH`:
 - `minimap2`
 - `freebayes`
 - `sbatch` (Slurm)
+- `Clang` for building lib-hts
 
 ## Install
 
@@ -26,8 +27,12 @@ souporcellx tools bootstrap   # build vendored tools from source
 
 ml freebayes/1.3.2-GCCcore-8.3.0
 ml minimap2/2.29-GCCcore-13.3.0
+ml Clang/18.1.8-GCCcore-13.3.0
 
 souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
+
+# skip coverage filtering if desired
+souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --skip-coverage-filter
 ```
 
 ## Commands
@@ -39,12 +44,40 @@ souporcellx tools update      # pull latest sources and rebuild
 souporcellx tools show        # print managed tool paths
 souporcellx manifest --cellranger-dirs /path/to/sample1 /path/to/sample2  # generate sample manifest from Cell Ranger outputs
 
-
 souporcellx validate --sample-manifest samples.csv --vcf-manifest vcfs.csv
 souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
+souporcellx filter-vcf --vcf input.vcf --bams s1.bam s2.bam --min-cov 20 --output filtered.vcf  # standalone VCF coverage filter
 ```
 
 By default `run` performs a dry run, printing every `sbatch` command that would be executed. Add `--submit` to actually submit jobs to Slurm.
+
+## VCF coverage filtering
+
+By default, `run` filters each VCF to retain only variants with sufficient read depth in the BAM files before running vartrix. This mirrors the coverage filtering performed by `souporcell_pipeline.py` (`samtools depth` + `bedtools intersect`), but implemented natively in Rust using `rust-htslib` — no `samtools` or `bedtools` required.
+
+For each (VCF, group) pair, a `covfilt_*` Slurm job runs before vartrix. It opens indexed BAMs for all samples in the group, queries depth at each VCF position, and keeps variants where combined depth >= `min_alt + min_ref` (default: 10 + 10 = 20) and < 100,000.
+
+The same `--min-alt` and `--min-ref` values are also passed to the souporcell binary for cell-level locus filtering during clustering.
+
+| Option | Default | Description |
+|---|---|---|
+| `--min-alt` | `10` | Minimum alt read depth for coverage filtering and souporcell clustering |
+| `--min-ref` | `10` | Minimum ref read depth for coverage filtering and souporcell clustering |
+| `--skip-coverage-filter` | off | Skip VCF coverage filtering (pass raw VCFs directly to vartrix) |
+
+The `filter-vcf` subcommand can also be used standalone outside the pipeline:
+
+```bash
+souporcellx filter-vcf --vcf common_variants.vcf --bams sample1.bam sample2.bam --min-cov 20 --output filtered.vcf
+
+## real test
+
+VCF=/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
+BAM=/hpc/temp/furlan_s/AML_MRD_DL3/merge_R1D2R2D1_oldwf/out_bam.bam
+souporcellx filter-vcf --vcf $VCF --bams $BAM --min-cov 20 --output filtered.vcf
+```
+
+**Note:** BAM files must be indexed (`.bai` files present).
 
 ## Generating a sample manifest
 
@@ -147,13 +180,21 @@ export LASTRUN="${LASTRUNTEMP//' on cluster gizmo'}"
 RUNNUM=$(sbatch -n 1 -c 12 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='samtools index -@ 12 out.sorted.bam')
 LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"
 export LASTRUN="${LASTRUNTEMP//' on cluster gizmo'}"
-export REF=/shared/biodata/ngs/Reference/10X/refdata-gex-GRCh38-2024-A/fasta/genome.fa
+
+
+export REF=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2020-A/fasta/genome.fa
 export VCF=/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
 export sif=/home/sfurlan/sifs/souporcell.sif
 export SINGULARITY_BINDPATH="/fh/scratch,/fh/fast,/shared,/hpc"
 export OUTDIR=$OUT/souporcell_1
 mkdir -p $OUTDIR
-RUNNUM=$(sbatch -n 1 -c 35 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='singularity exec $sif souporcell_pipeline.py \
+# RUNNUM=$(sbatch -n 1 -c 35 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='singularity exec $sif souporcell_pipeline.py \
+#                   -i out.sorted.bam -b out_barcodes.tsv.gz -f $REF --common_variants $VCF --skip_remap True \
+#                   -t 35 -o $OUTDIR -k $K')
+
+squeue -u $USER -h -o %i | awk '$1 > 50203326' | xargs scancel
+
+RUNNUM=$(sbatch -n 1 -c 35 -p campus-new --mem-per-cpu=16000MB --wrap='singularity exec $sif souporcell_pipeline.py \
                   -i out.sorted.bam -b out_barcodes.tsv.gz -f $REF --common_variants $VCF --skip_remap True \
                   -t 35 -o $OUTDIR -k $K')
 LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"

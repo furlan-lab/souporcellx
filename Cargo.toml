@@ -16,3 +16,4 @@ dirs = "5"
 sha2 = "0.10"
 hex = "0.4"
 time = { version = "0.3", features = ["formatting", "macros", "local-offset"] }
+rust-htslib = { version = "0.47", default-features = false, features = ["static"] }
