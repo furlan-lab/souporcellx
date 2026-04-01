@@ -21,6 +21,7 @@ cargo install --path .
 ## Quick start
 
 ```bash
+cd ~/develop/souporcellx
 cargo install --path .
 souporcellx tools fetch       # clone upstream vartrix & souporcell repos into vendor/
 souporcellx tools bootstrap   # build vendored tools from source
@@ -127,6 +128,7 @@ EOL
 cat > vcfs.csv << 'EOL'
 vcf_id,vcf_path
 kg1k,/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
+kg1k_deep,/hpc/temp/furlan_s/AML_MRD_DL3/merged_vcf/common_variants_grch38_1kg30x_maf2pct.vcf.gz
 EOL
 
 souporcellx validate --sample-manifest sample_mani.csv --vcf-manifest vcfs.csv
@@ -136,6 +138,20 @@ souporcellx run --sample-manifest sample_mani.csv \
                 --workdir $ROOT/$GROUPID \
                 --ref $REF \
                 --submit
+
+
+DEEP_FILT="kg1k/filtered/merge_p1p2/filtered.vcf"
+SHALLOW_FILT="kg1k_deep/filtered/merge_p1p2/filtered.vcf"
+
+grep -v '^#' "$DEEP_FILT" | awk '{print $1"\t"$2}' | sort -u > /tmp/deep_filt_pos.txt
+grep -v '^#' "$SHALLOW_FILT" | awk '{print $1"\t"$2}' | sort -u > /tmp/shallow_filt_pos.txt
+
+echo "deep total:    $(wc -l < /tmp/deep_filt_pos.txt)"
+echo "shallow total: $(wc -l < /tmp/shallow_filt_pos.txt)"
+echo "shared:        $(comm -12 /tmp/deep_filt_pos.txt /tmp/shallow_filt_pos.txt | wc -l)"
+echo "deep only:     $(comm -23 /tmp/deep_filt_pos.txt /tmp/shallow_filt_pos.txt | wc -l)"
+echo "shallow only:  $(comm -13 /tmp/deep_filt_pos.txt /tmp/shallow_filt_pos.txt | wc -l)"
+
 
 #souporcellx manifest --cellranger-dirs $ROOT/AML_MRD_R1_D2_A1 $ROOT/AML_MRD_R1_D2_A2 $ROOT/AML_MRD_R1_D2_B1 $ROOT/AML_MRD_R2_D1_B2 --group-id $GROUPID --output sample_mani.csv
 
@@ -205,6 +221,75 @@ samtools sort data/toy2.bam -o data/toy2_sorted.bam
 samtools index data/toy2_sorted.bam
 
 rm data/toy1.bam data/toy2.bam
+
+ROOT=/home/sfurlan/develop/souporcellx/data
+GROUPID=toy
+mkdir -p $ROOT/$GROUPID
+export OUT=$ROOT/$GROUPID
+
+ml Singularity/3.5.3
+ml Python/3.9.6-GCCcore-11.2.0
+ml SAMtools/1.14-GCC-11.2.0
+
+cd $OUT
+export K=1
+
+samps=(AML_MRD_R1_D2_A1 AML_MRD_R2_D1_B2) 
+labels=(AML_MRD_R1_D2_A1_ AML_MRD_R2_D1_B2_)
+bamvar=(../toy1_sorted.bam ../toy2_sorted.bam)
+bcvar=(../barcodes1.tsv.gz ../barcodes1.tsv.gz)
+
+export bams=$(IFS=, ; echo "${bamvar[*]}")
+export bcs=$(IFS=, ; echo "${bcvar[*]}")
+export samples=$(IFS=, ; echo "${labels[*]}")
+
+RUNNUM=$(sbatch -n 1 -c 1 -p campus-new --mem-per-cpu=40000MB --wrap='/home/sfurlan/develop/mergebams/target/release/mergebams \
+    --inputs $bams \
+    --labels $samples \
+    --bcs $bcs \
+    --out $OUT')
+LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"
+export LASTRUN="${LASTRUNTEMP//' on cluster gizmo'}"
+RUNNUM=$(sbatch -n 1 -c 24 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='samtools sort -@ 24 out_bam.bam -o out.sorted.bam')
+#RUNNUM=$(sbatch -n 1 -c 24 -p campus-new -M gizmo --mem-per-cpu=16000MB --wrap='samtools sort -@ 24 out_bam.bam -o out.sorted.bam')
+LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"
+export LASTRUN="${LASTRUNTEMP//' on cluster gizmo'}"
+RUNNUM=$(sbatch -n 1 -c 12 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='samtools index -@ 12 out.sorted.bam')
+LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"
+export LASTRUN="${LASTRUNTEMP//' on cluster gizmo'}"
+
+
+export REF=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2024-A/fasta/genome.fa
+export VCF=/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
+export sif=/home/sfurlan/sifs/souporcell.sif
+export SINGULARITY_BINDPATH="/fh/scratch,/fh/fast,/shared,/hpc"
+export OUTDIR=$OUT/souporcell_1
+mkdir -p $OUTDIR
+RUNNUM=$(sbatch -n 1 -c 35 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='singularity exec $sif souporcell_pipeline.py \
+                  -i out.sorted.bam -b out_barcodes.tsv.gz -f $REF --common_variants $VCF --skip_remap True \
+                  -t 35 -o $OUTDIR -k $K')
+
+
+RUNNUM=$(sbatch -n 1 -c 35 -p campus-new --mem-per-cpu=16000MB --wrap='singularity exec $sif souporcell_pipeline.py \
+                  -i out.sorted.bam -b out_barcodes.tsv.gz -f $REF --common_variants $VCF --skip_remap True \
+                  -t 35 -o $OUTDIR -k $K')
+LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"
+export LASTRUN="${LASTRUNTEMP//' on cluster gizmo'}"
+
+ks=(1 2 3 4 5 6 7 8)
+for k in ${ks[@]}; do
+export K=$k
+export OUTDIR=${OUT}/souporcell_${K}
+mkdir -p $OUTDIR
+RUNNUM=$(sbatch -n 1 -c 35 -p campus-new --dependency=afterok:$LASTRUN --mem-per-cpu=16000MB --wrap='singularity exec $sif /opt/souporcell/souporcell/target/release/souporcell -a souporcell_1/alt.mtx -r souporcell_1/ref.mtx -b out_barcodes.tsv.gz --min_alt 2 --min_ref 2 -k $K -t 35 > $OUTDIR/clusters_tmp.tsv 2> $OUTDIR/log.tsv')
+LASTRUNTEMP="${RUNNUM//'Submitted batch job '}"
+export LASTRUN2="${LASTRUNTEMP//' on cluster gizmo'}"
+sbatch -n 1 -c 1 -p campus-new --dependency=afterok:$LASTRUN2 --mem-per-cpu=16000MB --wrap='singularity exec $sif troublet -a souporcell_1/alt.mtx -r souporcell_1/ref.mtx --clusters $OUTDIR/clusters_tmp.tsv > $OUTDIR/clusters.tsv'
+done
+
+
+
+
 ```
 
 ```sh
