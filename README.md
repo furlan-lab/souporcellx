@@ -120,8 +120,8 @@ REF=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2024-A/fasta/genome.fa
 
 cat > sample_mani.csv << 'EOL'
 group_id,library_id,bam,barcodes,prefix
-merge_p1p2,AML_MRD_R1_D2_A1,/path/sample1.bam,/path/barcodes1.tsv.gz,AML_MRD_R1_D2_A1_
-merge_p1p2,AML_MRD_R2_D1_B2,/path/sample2.bam,/path/barcodes2.tsv.gz,AML_MRD_R2_D1_B2_
+merge_p1p2,AML_MRD_R1_D2_A1,../toy1.bam,../barcodes1.tsv.gz,AML_MRD_R1_D2_A1_
+merge_p1p2,AML_MRD_R2_D1_B2,../toy2.bam,../barcodes2.tsv.gz,AML_MRD_R2_D1_B2_
 EOL
 
 cat > vcfs.csv << 'EOL'
@@ -134,9 +134,7 @@ souporcellx validate --sample-manifest sample_mani.csv --vcf-manifest vcfs.csv
 souporcellx run --sample-manifest sample_mani.csv \
                 --vcf-manifest vcfs.csv \
                 --workdir $ROOT/$GROUPID \
-                --ref $REF \
-                --submit
-
+                --ref $REF
 
 # souporcellx manifest --cellranger-dirs $ROOT/AML_MRD_R1_D2_A1 $ROOT/AML_MRD_R1_D2_A2 $ROOT/AML_MRD_R1_D2_B1 $ROOT/AML_MRD_R2_D1_B2 --group-id $GROUPID --output sample_mani.csv
 
