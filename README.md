@@ -109,7 +109,7 @@ souporcellx manifest --cellranger-dirs /path/to/sample1 /path/to/sample2 \
     --group-id my_cohort --prefixes S1 S2 --output samples.csv
 
 
-#REAL EXAMPLE
+#TOY EXAMPLE
 ROOT=/home/sfurlan/develop/souporcellx/data
 GROUPID=toy
 mkdir -p $ROOT/$GROUPID
@@ -120,8 +120,8 @@ REF=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2024-A/fasta/genome.fa
 
 cat > sample_mani.csv << 'EOL'
 group_id,library_id,bam,barcodes,prefix
-merge_p1p2,AML_MRD_R1_D2_A1,../toy1.bam,../barcodes1.tsv.gz,AML_MRD_R1_D2_A1_
-merge_p1p2,AML_MRD_R2_D1_B2,../toy2.bam,../barcodes2.tsv.gz,AML_MRD_R2_D1_B2_
+merge_p1p2,AML_MRD_R1_D2_A1,../toy1_sorted.bam,../barcodes1.tsv.gz,AML_MRD_R1_D2_A1
+merge_p1p2,AML_MRD_R2_D1_B2,../toy2_sorted.bam,../barcodes2.tsv.gz,AML_MRD_R2_D1_B2
 EOL
 
 cat > vcfs.csv << 'EOL'
@@ -134,17 +134,12 @@ souporcellx validate --sample-manifest sample_mani.csv --vcf-manifest vcfs.csv
 souporcellx run --sample-manifest sample_mani.csv \
                 --vcf-manifest vcfs.csv \
                 --workdir $ROOT/$GROUPID \
-                --ref $REF
+                --ref $REF \
+                --submit
 
-# souporcellx manifest --cellranger-dirs $ROOT/AML_MRD_R1_D2_A1 $ROOT/AML_MRD_R1_D2_A2 $ROOT/AML_MRD_R1_D2_B1 $ROOT/AML_MRD_R2_D1_B2 --group-id $GROUPID --output sample_mani.csv
+#souporcellx manifest --cellranger-dirs $ROOT/AML_MRD_R1_D2_A1 $ROOT/AML_MRD_R1_D2_A2 $ROOT/AML_MRD_R1_D2_B1 $ROOT/AML_MRD_R2_D1_B2 --group-id $GROUPID --output sample_mani.csv
 
-# cat > vcfs.csv << 'EOL'
-# vcf_id,vcf_path
-# kg1k,/fh/fast/furlan_s/grp/refs/vcf/GRCh38/filtered_2p_1kgenomes_chr.vcf
-# kg1k_deep,/hpc/temp/furlan_s/AML_MRD_DL3/merged_vcf/common_variants_grch38_1kg30x_maf2pct.vcf.gz
-# EOL
-
-
+squeue -u $USER -h -o %i | awk '$1 > 50244982' | xargs scancel
 
 ```
 
@@ -203,10 +198,13 @@ N
 ```
 
 ```sh
+ml  SAMtools
+samtools sort data/toy1.bam -o data/toy1_sorted.bam
+samtools index data/toy1_sorted.bam
+samtools sort data/toy2.bam -o data/toy2_sorted.bam
+samtools index data/toy2_sorted.bam
 
-
-
-
+rm data/toy1.bam data/toy2.bam
 ```
 
 ```sh

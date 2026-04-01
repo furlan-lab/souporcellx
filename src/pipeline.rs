@@ -90,7 +90,7 @@ pub fn run(args: RunArgs) -> Result<()> {
                 if !dry_run {
                     fs::create_dir_all(&filter_dir)?;
                 }
-                let filtered_vcf = filter_dir.join("filtered.vcf");
+                let filtered_vcf = filter_dir.join("filtered.vcf.gz");
 
                 let bam_args: String = rows
                     .iter()
