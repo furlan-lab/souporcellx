@@ -40,14 +40,17 @@ Six modules behind a single `main.rs` entry point:
 - **slurm** — Thin wrapper around `sbatch` for job submission
 - **paths** — Cache directory and registry file path helpers
 
-## Pipeline Job DAG (per VCF panel)
+## Pipeline Job DAG
 
 ```
-For each sample → vartrix (extract variant matrices)
-                      ↓ (all complete)
-                  combine (aggregate matrices by group)
-                      ↓
-For each K value → souporcell (cluster) → troublet (refine)
+With VCF manifest (per VCF panel):
+  [covfilt per group] → vartrix per sample → combine per group → souporcell per K → troublet
+
+With --remap + VCF manifest:
+  remap per sample (top-level, shared) → [covfilt] → vartrix → combine → souporcell → troublet
+
+With --remap, no VCF manifest (de novo):
+  remap per sample → freebayes per group → vartrix → combine → souporcell → troublet
 ```
 
 Jobs are linked via Slurm `--dependency=afterok:JOBID` chains.
@@ -69,3 +72,4 @@ vendor/
 - `minimap2`, `freebayes` — checked at runtime before job submission
 - `sbatch` — required when `--submit` is used
 - `samtools`, `python3`/`python` — required when `--remap` is used
+- `freebayes`, `bcftools`, `bgzip`, `tabix` — required for de novo variant calling (`--remap` without `--vcf-manifest`)
