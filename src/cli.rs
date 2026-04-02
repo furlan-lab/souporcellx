@@ -142,7 +142,9 @@ pub enum ToolCommands {
 pub struct RunArgs {
     #[arg(long)]
     pub sample_manifest: PathBuf,
-    /// VCF manifest. Required unless --remap is used (freebayes will discover variants).
+    /// VCF manifest. Required unless --remap is used.
+    /// De novo variant calling is only supported with --remap.
+    /// Without --remap, you must provide --vcf-manifest.
     #[arg(long)]
     pub vcf_manifest: Option<PathBuf>,
     #[arg(long)]
@@ -173,6 +175,7 @@ pub struct RunArgs {
     #[arg(long, default_value_t = false)]
     pub skip_coverage_filter: bool,
     /// Enable remapping stage (renamer → minimap2 → retag → sort/index) before vartrix.
+    /// When set without --vcf-manifest, de novo variant calling is run via freebayes.
     #[arg(long, default_value_t = false)]
     pub remap: bool,
     /// Number of threads for minimap2 and samtools during remapping.

@@ -162,6 +162,8 @@ souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv \
 
 When `--remap` is used **without** a VCF manifest, souporcellx runs de novo variant discovery with `freebayes` instead of using a precomputed VCF panel. This is the fully self-contained mode -- no external VCF is needed.
 
+De novo variant calling **without** remapping is not supported. If `--remap` is not set, you must provide `--vcf-manifest`.
+
 The pipeline in this mode:
 1. **Remap** each sample (per-sample Slurm jobs)
 2. **Freebayes** per group -- merges the group's remapped BAMs, splits the genome into regions, runs freebayes in parallel, and produces a bgzipped + indexed VCF (`variants.vcf.gz`)
