@@ -24,10 +24,34 @@ pub fn validate_manifests(sample_manifest: &Path, vcf_manifest: &Path) -> Result
 }
 
 pub fn run(args: RunArgs) -> Result<()> {
-    validate_manifests(&args.sample_manifest, &args.vcf_manifest)?;
-    let _ = which("minimap2").context("minimap2 not found on PATH")?;
-    let _ = which("freebayes").context("freebayes not found on PATH")?;
+    // Validate manifests.
+    let sample_rows = read_sample_manifest(&args.sample_manifest)?;
+    validate_sample_rows(&sample_rows)?;
 
+    let use_freebayes = args.remap && args.vcf_manifest.is_none();
+
+    let vcf_rows = if let Some(ref vcf_path) = args.vcf_manifest {
+        let rows = read_vcf_manifest(vcf_path)?;
+        validate_vcf_rows(&rows)?;
+        rows
+    } else if !args.remap {
+        anyhow::bail!("--vcf-manifest is required unless --remap is used (freebayes will discover variants)");
+    } else {
+        Vec::new()
+    };
+
+    // Check external tool availability.
+    let _ = which("minimap2").context("minimap2 not found on PATH")?;
+    if !use_freebayes {
+        // freebayes only needed when explicitly using VCF manifest (legacy check).
+        // When doing de novo calling, the freebayes subcommand will check for it.
+    }
+    if use_freebayes {
+        let _ = which("freebayes").context("freebayes not found on PATH (required for de novo variant calling)")?;
+        let _ = which("bcftools").context("bcftools not found on PATH (required for de novo variant calling)")?;
+        let _ = which("bgzip").context("bgzip not found on PATH (required for de novo variant calling)")?;
+        let _ = which("tabix").context("tabix not found on PATH (required for de novo variant calling)")?;
+    }
     if args.remap {
         let _ = which("samtools").context("samtools not found on PATH (required for --remap)")?;
         let _ = resolve_python().context("python3/python not found on PATH (required for --remap)")?;
@@ -47,8 +71,6 @@ pub fn run(args: RunArgs) -> Result<()> {
         (None, None)
     };
 
-    let sample_rows = read_sample_manifest(&args.sample_manifest)?;
-    let vcf_rows = read_vcf_manifest(&args.vcf_manifest)?;
     let ks = parse_ks(&args.ks)?;
 
     fs::create_dir_all(&args.workdir)
@@ -63,9 +85,13 @@ pub fn run(args: RunArgs) -> Result<()> {
         println!("  retag    = {}", retagger.as_ref().unwrap().display());
         println!("  remap    = enabled (threads={})", args.remap_threads);
     }
+    if use_freebayes {
+        println!("  variants = de novo (freebayes)");
+    } else {
+        println!("  vcfs     = {}", vcf_rows.len());
+    }
     println!("  groups   = {}", unique_count(sample_rows.iter().map(|r| &r.group_id)));
     println!("  libraries= {}", unique_count(sample_rows.iter().map(|r| &r.library_id)));
-    println!("  vcfs     = {}", vcf_rows.len());
     println!("  ks       = {:?}", ks);
 
     let dry_run = !args.submit;
@@ -84,10 +110,10 @@ pub fn run(args: RunArgs) -> Result<()> {
         }
     };
 
-    let use_coverage_filter = !args.skip_coverage_filter;
+    let use_coverage_filter = !args.skip_coverage_filter && !use_freebayes;
     let min_cov = args.min_alt + args.min_ref;
 
-    // Pre-collect group -> sample rows for filter job generation.
+    // Pre-collect group -> sample rows.
     let mut group_samples: BTreeMap<&str, Vec<&crate::manifest::SampleRow>> = BTreeMap::new();
     for row in &sample_rows {
         group_samples.entry(row.group_id.as_str()).or_default().push(row);
@@ -97,7 +123,6 @@ pub fn run(args: RunArgs) -> Result<()> {
     let no_umi_str = if args.no_umi { "True" } else { "False" };
 
     // --- Remap stage (top-level, once per sample, shared across VCFs) ---
-    // Maps (library_id, bam_stem) -> (remap_jobid, remapped_bam_path)
     let mut remap_jobs: BTreeMap<String, (String, PathBuf)> = BTreeMap::new();
 
     if args.remap {
@@ -172,77 +197,195 @@ pub fn run(args: RunArgs) -> Result<()> {
         }
     }
 
-    for vcf in &vcf_rows {
-        let vcf_base = args.workdir.join(&vcf.vcf_id);
+    // --- Build VCF panels ---
+    // Each panel has a vcf_id and maps group_id -> (vcf_path, upstream_dep).
+    // For manifest entries: one panel per VCF row.
+    // For freebayes: one panel ("denovo") with per-group discovered VCFs.
+    struct VcfPanel {
+        vcf_id: String,
+        /// group_id -> (vcf_path_string, dependency_jobid)
+        group_vcfs: BTreeMap<String, (String, Option<String>)>,
+    }
+
+    let mut panels: Vec<VcfPanel> = Vec::new();
+
+    if use_freebayes {
+        // --- Freebayes: submit one job per group, producing a per-group VCF ---
+        let fb_base = args.workdir.join("denovo");
+        let fb_logdir = fb_base.join("logs");
+        if !dry_run {
+            fs::create_dir_all(&fb_logdir)?;
+        }
+
+        let mut group_vcfs: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
+
+        for (group_id, rows) in &group_samples {
+            let fb_dir = fb_base.join("variants").join(group_id);
+            if !dry_run {
+                fs::create_dir_all(&fb_dir)?;
+            }
+            let fb_vcf = fb_dir.join("variants.vcf.gz");
+
+            let bam_args: String = rows
+                .iter()
+                .map(|r| {
+                    let path = resolve_bam_path(r, &remap_jobs);
+                    format!("--bams {}", shell_escape(path))
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let fb_cmd = format!(
+                "{} freebayes {} --ref {} --threads {} --min-cov {} --output-dir {}",
+                shell_escape(self_bin.display().to_string()),
+                bam_args,
+                shell_escape(args.r#ref.display().to_string()),
+                args.remap_threads,
+                min_cov,
+                shell_escape(fb_dir.display().to_string()),
+            );
+
+            // Freebayes depends on all remap jobs for this group.
+            let dep_ids: Vec<&str> = rows
+                .iter()
+                .filter_map(|r| {
+                    let key = remap_key_for_row(r);
+                    remap_jobs.get(&key).map(|(id, _)| id.as_str())
+                })
+                .collect();
+            let fb_dep = if dep_ids.is_empty() { None } else { Some(dep_ids.join(":")) };
+
+            let fb_spec = JobSpec {
+                job_name: format!("freebayes_{}", group_id),
+                partition: args.partition.clone(),
+                cpus: args.remap_threads,
+                mem_mb: args.heavy_mem_mb,
+                dependency: fb_dep,
+                command: fb_cmd,
+                log_path: fb_logdir
+                    .join(format!("freebayes_{}.log", group_id))
+                    .display()
+                    .to_string(),
+            };
+            let fb_jobid = dispatch(&fb_spec)?;
+            group_vcfs.insert(
+                group_id.to_string(),
+                (fb_vcf.display().to_string(), Some(fb_jobid)),
+            );
+            total += 1;
+        }
+
+        panels.push(VcfPanel {
+            vcf_id: "denovo".to_string(),
+            group_vcfs,
+        });
+    } else {
+        // --- VCF manifest: one panel per VCF row ---
+        for vcf in &vcf_rows {
+            let vcf_base = args.workdir.join(&vcf.vcf_id);
+            let logdir = vcf_base.join("logs");
+            if !dry_run {
+                fs::create_dir_all(&logdir)?;
+            }
+
+            let mut group_vcfs: BTreeMap<String, (String, Option<String>)> = BTreeMap::new();
+
+            if use_coverage_filter {
+                for (group_id, rows) in &group_samples {
+                    let filter_dir = vcf_base.join("filtered").join(group_id);
+                    if !dry_run {
+                        fs::create_dir_all(&filter_dir)?;
+                    }
+                    let filtered_vcf = filter_dir.join("filtered.vcf.gz");
+
+                    let bam_args: String = rows
+                        .iter()
+                        .map(|r| {
+                            let bam_path = resolve_bam_path(r, &remap_jobs);
+                            shell_escape(bam_path)
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                    let covfilt_dep = if args.remap {
+                        let dep_ids: Vec<&str> = rows
+                            .iter()
+                            .filter_map(|r| {
+                                let key = remap_key_for_row(r);
+                                remap_jobs.get(&key).map(|(id, _)| id.as_str())
+                            })
+                            .collect();
+                        if dep_ids.is_empty() { None } else { Some(dep_ids.join(":")) }
+                    } else {
+                        None
+                    };
+
+                    let filter_cmd = format!(
+                        "{} filter-vcf --vcf {} --bams {} --min-cov {} --output {}",
+                        shell_escape(self_bin.display().to_string()),
+                        shell_escape(vcf.vcf_path.display().to_string()),
+                        bam_args,
+                        min_cov,
+                        shell_escape(filtered_vcf.display().to_string()),
+                    );
+
+                    let filter_spec = JobSpec {
+                        job_name: format!("covfilt_{}_{}", vcf.vcf_id, group_id),
+                        partition: args.partition.clone(),
+                        cpus: 4,
+                        mem_mb: args.light_mem_mb,
+                        dependency: covfilt_dep,
+                        command: filter_cmd,
+                        log_path: logdir
+                            .join(format!("covfilt_{}_{}.log", vcf.vcf_id, group_id))
+                            .display()
+                            .to_string(),
+                    };
+                    let filter_jobid = dispatch(&filter_spec)?;
+                    group_vcfs.insert(
+                        group_id.to_string(),
+                        (filtered_vcf.display().to_string(), Some(filter_jobid)),
+                    );
+                    total += 1;
+                }
+            } else {
+                // No coverage filter: all groups use the raw VCF.
+                for group_id in group_samples.keys() {
+                    let remap_dep = if args.remap {
+                        let rows = &group_samples[group_id];
+                        let dep_ids: Vec<&str> = rows
+                            .iter()
+                            .filter_map(|r| {
+                                let key = remap_key_for_row(r);
+                                remap_jobs.get(&key).map(|(id, _)| id.as_str())
+                            })
+                            .collect();
+                        if dep_ids.is_empty() { None } else { Some(dep_ids.join(":")) }
+                    } else {
+                        None
+                    };
+                    group_vcfs.insert(
+                        group_id.to_string(),
+                        (vcf.vcf_path.display().to_string(), remap_dep),
+                    );
+                }
+            }
+
+            panels.push(VcfPanel {
+                vcf_id: vcf.vcf_id.clone(),
+                group_vcfs,
+            });
+        }
+    }
+
+    // --- Process each VCF panel: vartrix → combine → souporcell → troublet ---
+    for panel in &panels {
+        let vcf_base = args.workdir.join(&panel.vcf_id);
         let logdir = vcf_base.join("logs");
         if !dry_run {
             fs::create_dir_all(&logdir)?;
         }
 
-        // Submit coverage filter jobs per group (before vartrix).
-        // Maps group_id -> (filter_jobid, filtered_vcf_path)
-        let mut filter_jobs: BTreeMap<&str, (String, String)> = BTreeMap::new();
-        if use_coverage_filter {
-            for (group_id, rows) in &group_samples {
-                let filter_dir = vcf_base.join("filtered").join(group_id);
-                if !dry_run {
-                    fs::create_dir_all(&filter_dir)?;
-                }
-                let filtered_vcf = filter_dir.join("filtered.vcf.gz");
-
-                // Use remapped BAMs for coverage filtering when --remap is enabled.
-                let bam_args: String = rows
-                    .iter()
-                    .map(|r| {
-                        let bam_path = resolve_bam_path(r, &remap_jobs);
-                        shell_escape(bam_path)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                // Covfilt depends on remap jobs for all samples in this group.
-                let covfilt_dep = if args.remap {
-                    let dep_ids: Vec<&str> = rows
-                        .iter()
-                        .filter_map(|r| {
-                            let key = remap_key_for_row(r);
-                            remap_jobs.get(&key).map(|(id, _)| id.as_str())
-                        })
-                        .collect();
-                    if dep_ids.is_empty() { None } else { Some(dep_ids.join(":")) }
-                } else {
-                    None
-                };
-
-                let filter_cmd = format!(
-                    "{} filter-vcf --vcf {} --bams {} --min-cov {} --output {}",
-                    shell_escape(self_bin.display().to_string()),
-                    shell_escape(vcf.vcf_path.display().to_string()),
-                    bam_args,
-                    min_cov,
-                    shell_escape(filtered_vcf.display().to_string()),
-                );
-
-                let filter_spec = JobSpec {
-                    job_name: format!("covfilt_{}_{}", vcf.vcf_id, group_id),
-                    partition: args.partition.clone(),
-                    cpus: 4,
-                    mem_mb: args.light_mem_mb,
-                    dependency: covfilt_dep,
-                    command: filter_cmd,
-                    log_path: logdir
-                        .join(format!("covfilt_{}_{}.log", vcf.vcf_id, group_id))
-                        .display()
-                        .to_string(),
-                };
-                let filter_jobid = dispatch(&filter_spec)?;
-                filter_jobs.insert(group_id, (filter_jobid, filtered_vcf.display().to_string()));
-                total += 1;
-            }
-        }
-
-        // Track vartrix jobs and output dirs per group.
-        // Each entry: (jobid, output_dir, barcode_prefix)
         let mut groups: BTreeMap<&str, Vec<(String, String, String)>> = BTreeMap::new();
 
         for row in &sample_rows {
@@ -258,16 +401,11 @@ pub fn run(args: RunArgs) -> Result<()> {
                 fs::create_dir_all(&row_out)?;
             }
 
-            // Use filtered VCF if coverage filtering is enabled, otherwise raw VCF.
-            let vcf_path_for_vartrix = if let Some((_, ref filtered_path)) =
-                filter_jobs.get(row.group_id.as_str())
-            {
-                filtered_path.clone()
-            } else {
-                vcf.vcf_path.display().to_string()
-            };
+            let (vcf_path, upstream_dep) = panel
+                .group_vcfs
+                .get(row.group_id.as_str())
+                .expect("group missing from panel");
 
-            // Use remapped BAM when --remap is enabled.
             let bam_for_vartrix = resolve_bam_path(row, &remap_jobs);
 
             let cmd = format!(
@@ -275,34 +413,22 @@ pub fn run(args: RunArgs) -> Result<()> {
                 shell_escape(vartrix.display().to_string()),
                 shell_escape(bam_for_vartrix),
                 shell_escape(row.barcodes.display().to_string()),
-                shell_escape(vcf_path_for_vartrix),
+                shell_escape(vcf_path.clone()),
                 shell_escape(args.r#ref.display().to_string()),
                 shell_escape(row_out.join("alt.mtx").display().to_string()),
                 shell_escape(row_out.join("ref.mtx").display().to_string()),
                 shell_escape(row_out.join("barcodes.tsv").display().to_string()),
             );
 
-            // Vartrix depends on covfilt (if present), and also on remap (if present).
-            let vartrix_dep = {
-                let mut deps = Vec::new();
-                if let Some((filter_jobid, _)) = filter_jobs.get(row.group_id.as_str()) {
-                    deps.push(filter_jobid.clone());
-                } else if let Some((remap_jobid, _)) = remap_jobs.get(&remap_key_for_row(row)) {
-                    // Only add remap dep directly if there's no covfilt (covfilt already depends on remap).
-                    deps.push(remap_jobid.clone());
-                }
-                if deps.is_empty() { None } else { Some(deps.join(":")) }
-            };
-
             let spec = JobSpec {
-                job_name: format!("vtx_{}_{}_{}", vcf.vcf_id, row.library_id, bam_base),
+                job_name: format!("vtx_{}_{}_{}", panel.vcf_id, row.library_id, bam_base),
                 partition: args.partition.clone(),
                 cpus: args.vartrix_threads,
                 mem_mb: args.heavy_mem_mb,
-                dependency: vartrix_dep,
+                dependency: upstream_dep.clone(),
                 command: cmd,
                 log_path: logdir
-                    .join(format!("vtx_{}_{}_{}.log", vcf.vcf_id, row.library_id, bam_base))
+                    .join(format!("vtx_{}_{}_{}.log", panel.vcf_id, row.library_id, bam_base))
                     .display()
                     .to_string(),
             };
@@ -318,7 +444,6 @@ pub fn run(args: RunArgs) -> Result<()> {
             total += 1;
         }
 
-        // For each group: combine, then souporcell + troublet per K.
         for (group_id, entries) in &groups {
             let combined_dir = vcf_base.join("combined").join(group_id);
 
@@ -344,14 +469,14 @@ pub fn run(args: RunArgs) -> Result<()> {
 
             let dep = Some(vartrix_jobids.join(":"));
             let combine_spec = JobSpec {
-                job_name: format!("combine_{}_{}", vcf.vcf_id, group_id),
+                job_name: format!("combine_{}_{}", panel.vcf_id, group_id),
                 partition: args.partition.clone(),
                 cpus: 4,
                 mem_mb: args.light_mem_mb,
                 dependency: dep,
                 command: combine_cmd,
                 log_path: logdir
-                    .join(format!("combine_{}_{}.log", vcf.vcf_id, group_id))
+                    .join(format!("combine_{}_{}.log", panel.vcf_id, group_id))
                     .display()
                     .to_string(),
             };
@@ -364,7 +489,7 @@ pub fn run(args: RunArgs) -> Result<()> {
                     fs::create_dir_all(&outdir)?;
                 }
                 let cluster_spec = JobSpec {
-                    job_name: format!("soup_{}_{}_k{}", vcf.vcf_id, group_id, k),
+                    job_name: format!("soup_{}_{}_k{}", panel.vcf_id, group_id, k),
                     partition: args.partition.clone(),
                     cpus: args.souporcell_threads,
                     mem_mb: args.heavy_mem_mb,
@@ -383,7 +508,7 @@ pub fn run(args: RunArgs) -> Result<()> {
                         shell_escape(outdir.join("log.tsv").display().to_string()),
                     ),
                     log_path: logdir
-                        .join(format!("soup_{}_{}_k{}.log", vcf.vcf_id, group_id, k))
+                        .join(format!("soup_{}_{}_k{}.log", panel.vcf_id, group_id, k))
                         .display()
                         .to_string(),
                 };
@@ -391,7 +516,7 @@ pub fn run(args: RunArgs) -> Result<()> {
                 total += 1;
 
                 let troublet_spec = JobSpec {
-                    job_name: format!("troublet_{}_{}_k{}", vcf.vcf_id, group_id, k),
+                    job_name: format!("troublet_{}_{}_k{}", panel.vcf_id, group_id, k),
                     partition: args.partition.clone(),
                     cpus: 1,
                     mem_mb: args.light_mem_mb,
@@ -405,7 +530,7 @@ pub fn run(args: RunArgs) -> Result<()> {
                         shell_escape(outdir.join("clusters.tsv").display().to_string()),
                     ),
                     log_path: logdir
-                        .join(format!("troublet_{}_{}_k{}.log", vcf.vcf_id, group_id, k))
+                        .join(format!("troublet_{}_{}_k{}.log", panel.vcf_id, group_id, k))
                         .display()
                         .to_string(),
                 };

@@ -1,6 +1,7 @@
 mod cli;
 mod combine;
 mod filter_vcf;
+mod freebayes;
 mod manifest;
 mod paths;
 mod pipeline;
@@ -37,6 +38,13 @@ fn main() -> Result<()> {
             min_cov,
             output,
         } => filter_vcf::filter_vcf(&vcf, &bams, min_cov, &output),
+        Commands::Freebayes {
+            bams,
+            r#ref,
+            threads,
+            min_cov,
+            output_dir,
+        } => freebayes::run_freebayes(&bams, &r#ref, threads, min_cov, &output_dir),
         Commands::Combine {
             inputs,
             labels,

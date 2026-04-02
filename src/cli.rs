@@ -65,6 +65,24 @@ pub enum Commands {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Run freebayes variant calling on BAMs (used internally by the pipeline).
+    Freebayes {
+        /// Input BAM files (will be merged if multiple).
+        #[arg(long, required = true, num_args = 1..)]
+        bams: Vec<PathBuf>,
+        /// Reference FASTA (must have .fai index).
+        #[arg(long)]
+        r#ref: PathBuf,
+        /// Number of parallel freebayes processes.
+        #[arg(long, default_value_t = 24)]
+        threads: u32,
+        /// Minimum coverage for freebayes.
+        #[arg(long, default_value_t = 20)]
+        min_cov: u32,
+        /// Output directory (final VCF will be variants.vcf.gz).
+        #[arg(long)]
+        output_dir: PathBuf,
+    },
     /// Submit or print the workflow plan.
     Run(RunArgs),
 }
@@ -85,8 +103,9 @@ pub enum ToolCommands {
 pub struct RunArgs {
     #[arg(long)]
     pub sample_manifest: PathBuf,
+    /// VCF manifest. Required unless --remap is used (freebayes will discover variants).
     #[arg(long)]
-    pub vcf_manifest: PathBuf,
+    pub vcf_manifest: Option<PathBuf>,
     #[arg(long)]
     pub r#ref: PathBuf,
     #[arg(long)]
