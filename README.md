@@ -11,10 +11,12 @@ A Rust-first orchestrator for [souporcell](https://github.com/wheaton5/souporcel
 ## Requirements
 
 The following must be available on the cluster `PATH`:
-- `minimap2`
-- `freebayes`
 - `sbatch` (Slurm)
-- `Clang` for building lib-hts
+- `Clang` for building vendored tools (lib-hts)
+
+Additional requirements depending on mode:
+- `--remap`: `minimap2`, `samtools`
+- `--remap` without `--vcf-manifest` (de novo): all of the above plus `freebayes`, `bcftools`, `bgzip`, `tabix`
 
 ## Install
 
@@ -38,6 +40,13 @@ souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref geno
 
 # skip coverage filtering if desired
 souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --skip-coverage-filter
+
+# remap + VCF manifest
+souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --remap
+
+# de novo variant calling (remap + freebayes, no VCF manifest needed)
+ml SAMtools/1.21-GCC-13.3.0
+souporcellx run --sample-manifest samples.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --remap
 ```
 
 ## Commands
@@ -113,6 +122,77 @@ souporcellx manifest --cellranger-dirs /path/to/sample1 /path/to/sample2 \
 | `--group-id` | `group1` | Group ID assigned to all rows |
 | `--prefixes` | *(uses library_id)* | Barcode prefixes, one per sample. Adds a `prefix` column to the output |
 | `--output` | stdout | Write manifest to a file |
+
+## Remapping (`--remap`)
+
+The `--remap` flag enables a per-sample BAM remapping stage before vartrix. This mirrors the remapping step in the original `souporcell_pipeline.py`: cell barcodes and UMIs are extracted from BAM tags, reads are realigned with `minimap2`, and tags are reattached.
+
+The remap stage runs as an independent Slurm job per sample, and all downstream jobs depend on it.
+
+**Additional PATH requirements when using `--remap`:**
+- `samtools`
+- `minimap2`
+
+```bash
+# Remap with de novo variant calling (no VCF manifest needed)
+souporcellx run --sample-manifest samples.csv \
+    --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 \
+    --remap --submit
+
+# Remap can also be combined with a VCF manifest if you already have variant panels
+souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv \
+    --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 \
+    --remap --submit
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--remap` | off | Enable remapping (renamer -> minimap2 -> retag -> sort/index) |
+| `--remap-threads` | `24` | Threads for minimap2 and samtools during remapping |
+| `--umi-tag` | `UB` | BAM tag for UMIs |
+| `--cell-tag` | `CB` | BAM tag for cell barcodes |
+| `--no-umi` | off | Set if BAM files lack UMI tags |
+
+## De novo variant calling (`--remap` without `--vcf-manifest`)
+
+When `--remap` is used **without** a VCF manifest, souporcellx runs de novo variant discovery with `freebayes` instead of using a precomputed VCF panel. This is the fully self-contained mode -- no external VCF is needed.
+
+The pipeline in this mode:
+1. **Remap** each sample (per-sample Slurm jobs)
+2. **Freebayes** per group -- merges the group's remapped BAMs, splits the genome into regions, runs freebayes in parallel, and produces a bgzipped + indexed VCF (`variants.vcf.gz`)
+3. **Vartrix** -> **combine** -> **souporcell** -> **troublet** (same as standard mode, using the freebayes-discovered VCF)
+
+**Additional PATH requirements for de novo mode:**
+- Everything required by `--remap` (above), plus:
+- `freebayes`
+- `bcftools`
+- `bgzip`
+- `tabix`
+
+```bash
+# De novo variant calling (no VCF manifest needed)
+souporcellx run --sample-manifest samples.csv \
+    --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 \
+    --remap --submit
+```
+
+The freebayes step uses `--min-cov` (derived from `--min-alt + --min-ref`, default 20) and runs with the same thread count as `--remap-threads`.
+
+## Souporcell3 mode
+
+The upstream souporcell binary supports a `souporcell3` mode that iterates multiple times to refine clustering results, with bad cluster detection and reinitialization. This is recommended for datasets with a high number of donors (>16).
+
+```bash
+# Enable souporcell3 with k harmonic means clustering
+souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv \
+    --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 \
+    --souporcell3 --clustering-method khm --submit
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--souporcell3` | off | Enable iterative refinement with bad cluster reinitialization |
+| `--clustering-method` | *(unset, uses souporcell default: em)* | Clustering method: `em` (expectation maximization) or `khm` (k harmonic means) |
 
 ## Sample manifest
 

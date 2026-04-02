@@ -54,22 +54,12 @@ pub fn run(args: RunArgs) -> Result<()> {
     }
     if args.remap {
         let _ = which("samtools").context("samtools not found on PATH (required for --remap)")?;
-        let _ = resolve_python().context("python3/python not found on PATH (required for --remap)")?;
     }
 
     let vartrix = toolchain::resolve_binary("vartrix")?;
     let souporcell = toolchain::resolve_binary("souporcell")?;
     let troublet = toolchain::resolve_binary("troublet")?;
     let self_bin = std::env::current_exe().context("cannot determine souporcellx binary path")?;
-
-    let (renamer, retagger) = if args.remap {
-        (
-            Some(toolchain::resolve_script("renamer.py")?),
-            Some(toolchain::resolve_script("retag.py")?),
-        )
-    } else {
-        (None, None)
-    };
 
     let ks = parse_ks(&args.ks)?;
 
@@ -81,8 +71,6 @@ pub fn run(args: RunArgs) -> Result<()> {
     println!("  souporcell = {}", souporcell.display());
     println!("  troublet = {}", troublet.display());
     if args.remap {
-        println!("  renamer  = {}", renamer.as_ref().unwrap().display());
-        println!("  retag    = {}", retagger.as_ref().unwrap().display());
         println!("  remap    = enabled (threads={})", args.remap_threads);
     }
     if use_freebayes {
@@ -119,9 +107,6 @@ pub fn run(args: RunArgs) -> Result<()> {
         group_samples.entry(row.group_id.as_str()).or_default().push(row);
     }
 
-    let python = resolve_python().unwrap_or_default();
-    let no_umi_str = if args.no_umi { "True" } else { "False" };
-
     // --- Remap stage (top-level, once per sample, shared across VCFs) ---
     let mut remap_jobs: BTreeMap<String, (String, PathBuf)> = BTreeMap::new();
 
@@ -132,8 +117,7 @@ pub fn run(args: RunArgs) -> Result<()> {
             fs::create_dir_all(&remap_logdir)?;
         }
 
-        let renamer = renamer.as_ref().unwrap();
-        let retagger = retagger.as_ref().unwrap();
+        let no_umi_flag = if args.no_umi { " --no-umi" } else { "" };
 
         for row in &sample_rows {
             let bam_base = row
@@ -150,31 +134,27 @@ pub fn run(args: RunArgs) -> Result<()> {
             let remapped_bam = remap_dir.join("retagged_sorted.bam");
 
             let remap_cmd = format!(
-                "{python} {renamer} --bam {bam} --barcodes {barcodes} --out {fq} \
-                 --no_umi {no_umi} --umi_tag {umi_tag} --cell_tag {cell_tag} && \
-                 gzip {fq} && \
+                "{self_bin} rename --bam {bam} --barcodes {barcodes} --output {fqgz} \
+                 --umi-tag {umi_tag} --cell-tag {cell_tag}{no_umi_flag} && \
                  minimap2 -ax splice -t {threads} -G50k -k 21 \
                  -w 11 --sr -A2 -B8 -O12,32 -E2,1 -r200 -p.5 -N20 -f1000,5000 \
                  -n2 -m20 -s40 -g2000 -2K50m --secondary=no \
                  {ref_fa} {fqgz} 2> {mm2log} | samtools view -bS -o {remapped_bam} && \
-                 {python} {retagger} --sam {remapped_bam} --out {retagged} \
-                 --no_umi {no_umi} --umi_tag {umi_tag} --cell_tag {cell_tag} && \
+                 {self_bin} retag --bam {remapped_bam} --output {retagged} \
+                 --umi-tag {umi_tag} --cell-tag {cell_tag}{no_umi_flag} && \
                  samtools sort -@ {threads} {retagged} -o {sorted} && \
                  samtools index -@ {threads} {sorted}",
-                python = shell_escape(python.clone()),
-                renamer = shell_escape(renamer.display().to_string()),
+                self_bin = shell_escape(self_bin.display().to_string()),
                 bam = shell_escape(row.bam.display().to_string()),
                 barcodes = shell_escape(row.barcodes.display().to_string()),
-                fq = shell_escape(remap_dir.join("renamed.fq").display().to_string()),
                 fqgz = shell_escape(remap_dir.join("renamed.fq.gz").display().to_string()),
-                no_umi = no_umi_str,
                 umi_tag = &args.umi_tag,
                 cell_tag = &args.cell_tag,
+                no_umi_flag = no_umi_flag,
                 threads = args.remap_threads,
                 ref_fa = shell_escape(args.r#ref.display().to_string()),
                 remapped_bam = shell_escape(remap_dir.join("remapped.bam").display().to_string()),
                 mm2log = shell_escape(remap_dir.join("minimap2.log").display().to_string()),
-                retagger = shell_escape(retagger.display().to_string()),
                 retagged = shell_escape(remap_dir.join("retagged.bam").display().to_string()),
                 sorted = shell_escape(remapped_bam.display().to_string()),
             );
@@ -495,7 +475,7 @@ pub fn run(args: RunArgs) -> Result<()> {
                     mem_mb: args.heavy_mem_mb,
                     dependency: Some(combine_jobid.clone()),
                     command: format!(
-                        "{} -a {} -r {} -b {} -k {} -t {} --min_alt {} --min_ref {} > {} 2> {}",
+                        "{} -a {} -r {} -b {} -k {} -t {} --min_alt {} --min_ref {}{}{} > {} 2> {}",
                         shell_escape(souporcell.display().to_string()),
                         shell_escape(combined_dir.join("alt.mtx").display().to_string()),
                         shell_escape(combined_dir.join("ref.mtx").display().to_string()),
@@ -504,6 +484,11 @@ pub fn run(args: RunArgs) -> Result<()> {
                         args.souporcell_threads,
                         args.min_alt,
                         args.min_ref,
+                        if args.souporcell3 { " -s true" } else { "" },
+                        match args.clustering_method.as_deref() {
+                            Some(m) => format!(" -m {}", m),
+                            None => String::new(),
+                        },
                         shell_escape(outdir.join("clusters_tmp.tsv").display().to_string()),
                         shell_escape(outdir.join("log.tsv").display().to_string()),
                     ),
@@ -565,17 +550,6 @@ fn unique_count<'a>(iter: impl Iterator<Item = &'a String>) -> usize {
 
 fn shell_escape(s: String) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-/// Find python3 or python on PATH.
-fn resolve_python() -> Result<String> {
-    if which("python3").is_ok() {
-        Ok("python3".to_string())
-    } else if which("python").is_ok() {
-        Ok("python".to_string())
-    } else {
-        anyhow::bail!("neither python3 nor python found on PATH")
-    }
 }
 
 /// Build the remap key for a sample row (matches the remap output directory name).

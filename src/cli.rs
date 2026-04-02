@@ -65,6 +65,45 @@ pub enum Commands {
         #[arg(long)]
         output: PathBuf,
     },
+    /// Extract reads from a BAM as gzipped FASTQ with barcodes/UMIs encoded in read names (used internally by the pipeline).
+    Rename {
+        /// Input BAM file.
+        #[arg(long)]
+        bam: PathBuf,
+        /// Barcode whitelist file (plain text or gzipped).
+        #[arg(long)]
+        barcodes: PathBuf,
+        /// Output gzipped FASTQ path.
+        #[arg(long)]
+        output: PathBuf,
+        /// BAM tag for UMIs.
+        #[arg(long, default_value = "UB")]
+        umi_tag: String,
+        /// BAM tag for cell barcodes.
+        #[arg(long, default_value = "CB")]
+        cell_tag: String,
+        /// Set if BAM files lack UMI tags.
+        #[arg(long, default_value_t = false)]
+        no_umi: bool,
+    },
+    /// Re-tag BAM reads with barcodes/UMIs parsed from read names (used internally by the pipeline).
+    Retag {
+        /// Input BAM file (with encoded read names).
+        #[arg(long)]
+        bam: PathBuf,
+        /// Output BAM path.
+        #[arg(long)]
+        output: PathBuf,
+        /// BAM tag for UMIs.
+        #[arg(long, default_value = "UB")]
+        umi_tag: String,
+        /// BAM tag for cell barcodes.
+        #[arg(long, default_value = "CB")]
+        cell_tag: String,
+        /// Set if BAM files lack UMI tags.
+        #[arg(long, default_value_t = false)]
+        no_umi: bool,
+    },
     /// Run freebayes variant calling on BAMs (used internally by the pipeline).
     Freebayes {
         /// Input BAM files (will be merged if multiple).
@@ -139,13 +178,19 @@ pub struct RunArgs {
     /// Number of threads for minimap2 and samtools during remapping.
     #[arg(long, default_value_t = 24)]
     pub remap_threads: u32,
-    /// BAM tag for UMIs (passed to renamer.py / retag.py).
+    /// BAM tag for UMIs (passed to rename/retag).
     #[arg(long, default_value = "UB")]
     pub umi_tag: String,
-    /// BAM tag for cell barcodes (passed to renamer.py / retag.py).
+    /// BAM tag for cell barcodes (passed to rename/retag).
     #[arg(long, default_value = "CB")]
     pub cell_tag: String,
     /// Set if BAM files lack UMI tags.
     #[arg(long, default_value_t = false)]
     pub no_umi: bool,
+    /// Use souporcell3 mode (iterative refinement, recommended for >16 donors).
+    #[arg(long, default_value_t = false)]
+    pub souporcell3: bool,
+    /// Clustering method: "em" (expectation maximization) or "khm" (k harmonic means).
+    #[arg(long)]
+    pub clustering_method: Option<String>,
 }

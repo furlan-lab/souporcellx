@@ -5,6 +5,8 @@ mod freebayes;
 mod manifest;
 mod paths;
 mod pipeline;
+mod renamer;
+mod retag;
 mod slurm;
 mod toolchain;
 
@@ -38,6 +40,21 @@ fn main() -> Result<()> {
             min_cov,
             output,
         } => filter_vcf::filter_vcf(&vcf, &bams, min_cov, &output),
+        Commands::Rename {
+            bam,
+            barcodes,
+            output,
+            umi_tag,
+            cell_tag,
+            no_umi,
+        } => renamer::rename_bam_to_fastq(&bam, &barcodes, &output, no_umi, &umi_tag, &cell_tag),
+        Commands::Retag {
+            bam,
+            output,
+            umi_tag,
+            cell_tag,
+            no_umi,
+        } => retag::retag_bam(&bam, &output, no_umi, &umi_tag, &cell_tag),
         Commands::Freebayes {
             bams,
             r#ref,

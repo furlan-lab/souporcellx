@@ -152,27 +152,6 @@ pub fn resolve_binary(name: &str) -> Result<PathBuf> {
         .ok_or_else(|| anyhow::anyhow!("managed tool not found: {}. Run tools bootstrap.", name))
 }
 
-/// Resolve a script (e.g. renamer.py, retag.py) relative to the souporcell vendor source.
-///
-/// The registry stores source_path as `vendor/souporcell/souporcell` (the Rust crate);
-/// the scripts live one level up at `vendor/souporcell/`.
-pub fn resolve_script(script_name: &str) -> Result<PathBuf> {
-    let registry = read_registry()?;
-    let rec = registry
-        .into_iter()
-        .find(|r| r.name == "souporcell")
-        .ok_or_else(|| anyhow::anyhow!("souporcell not in registry. Run tools bootstrap."))?;
-    let source = PathBuf::from(&rec.source_path);
-    let parent = source
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("cannot determine parent of {}", rec.source_path))?;
-    let script = parent.join(script_name);
-    if !script.exists() {
-        bail!("script not found: {}", script.display());
-    }
-    Ok(script)
-}
-
 fn build_cargo_bin(src: &Path, bin_name: &str, root: &Path) -> Result<PathBuf> {
     println!("Building {} in {}", bin_name, src.display());
     let status = Command::new("cargo")

@@ -71,5 +71,5 @@ vendor/
 
 - `minimap2`, `freebayes` — checked at runtime before job submission
 - `sbatch` — required when `--submit` is used
-- `samtools`, `python3`/`python` — required when `--remap` is used
+- `samtools` — required when `--remap` is used
 - `freebayes`, `bcftools`, `bgzip`, `tabix` — required for de novo variant calling (`--remap` without `--vcf-manifest`)

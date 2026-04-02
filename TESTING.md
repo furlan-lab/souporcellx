@@ -1,8 +1,6 @@
-## test remapping with minimap2 on toy data
+## Test remap on toy data
 
-Tests the souporcell remapping pipeline (renamer → minimap2 → retag → sort/merge)
-on the toy dataset, then runs souporcellx on the remapped BAM to compare with the
-no-remap workflow.
+Tests the souporcellx remap pipeline on the toy dataset with a VCF manifest.
 
 ```sh
 screen
@@ -13,12 +11,9 @@ grabnode
 N
 
 ml SAMtools
-ml Python/3.9.6-GCCcore-11.2.0
-
 ml freebayes/1.3.2-GCCcore-8.3.0
 ml minimap2/2.29-GCCcore-13.3.0
 ml Clang/18.1.8-GCCcore-13.3.0
-
 
 ROOT=/home/sfurlan/develop/souporcellx/data
 GROUPID=toy_remap
@@ -26,68 +21,11 @@ mkdir -p $ROOT/$GROUPID
 cd $ROOT/$GROUPID
 
 REF=/fh/fast/furlan_s/grp/refs/GRCh38/refdata-gex-GRCh38-2024-A/fasta/genome.fa
-SCRIPTS=/home/sfurlan/develop/souporcellx/vendor/souporcell
-THREADS=24
 
-# --- Remap toy1 ---
-BAM1=$ROOT/toy1_sorted.bam
-BC1=$ROOT/barcodes1.tsv.gz
-REMAP1=$ROOT/$GROUPID/remap_toy1
-mkdir -p $REMAP1/logs
-
-# Step 1: extract reads to FASTQ with barcodes/UMIs in read names
-python $SCRIPTS/renamer.py \
-  --bam $BAM1 --barcodes $BC1 \
-  --out $REMAP1/renamed.fq \
-  --chrom chr1 --start 0 --end 250000000 \
-  --no_umi False --umi_tag UB --cell_tag CB
-
-# Step 2: remap with minimap2
-minimap2 -ax splice -t $THREADS -G50k -k 21 \
-  -w 11 --sr -A2 -B8 -O12,32 -E2,1 -r200 -p.5 -N20 -f1000,5000 \
-  -n2 -m20 -s40 -g2000 -2K50m --secondary=no \
-  $REF $REMAP1/renamed.fq > $REMAP1/remapped.sam 2> $REMAP1/logs/minimap2.log
-
-# Step 3: retag with cell barcodes and UMIs
-python $SCRIPTS/retag.py \
-  --sam $REMAP1/remapped.sam \
-  --out $REMAP1/retagged.bam \
-  --no_umi False --umi_tag UB --cell_tag CB
-
-# Step 4: sort and index
-samtools sort -@ $THREADS $REMAP1/retagged.bam -o $REMAP1/retagged_sorted.bam
-samtools index -@ $THREADS $REMAP1/retagged_sorted.bam
-
-# --- Remap toy2 ---
-BAM2=$ROOT/toy2_sorted.bam
-BC2=$ROOT/barcodes2.tsv.gz
-REMAP2=$ROOT/$GROUPID/remap_toy2
-mkdir -p $REMAP2/logs
-
-python $SCRIPTS/renamer.py \
-  --bam $BAM2 --barcodes $BC2 \
-  --out $REMAP2/renamed.fq \
-  --chrom chr1 --start 0 --end 250000000 \
-  --no_umi False --umi_tag UB --cell_tag CB
-
-minimap2 -ax splice -t $THREADS -G50k -k 21 \
-  -w 11 --sr -A2 -B8 -O12,32 -E2,1 -r200 -p.5 -N20 -f1000,5000 \
-  -n2 -m20 -s40 -g2000 -2K50m --secondary=no \
-  $REF $REMAP2/renamed.fq > $REMAP2/remapped.sam 2> $REMAP2/logs/minimap2.log
-
-python $SCRIPTS/retag.py \
-  --sam $REMAP2/remapped.sam \
-  --out $REMAP2/retagged.bam \
-  --no_umi False --umi_tag UB --cell_tag CB
-
-samtools sort -@ $THREADS $REMAP2/retagged.bam -o $REMAP2/retagged_sorted.bam
-samtools index -@ $THREADS $REMAP2/retagged_sorted.bam
-
-# --- Run souporcellx on remapped BAMs ---
 cat > sample_mani.csv << 'EOL'
 group_id,library_id,bam,barcodes,prefix
-merge_p1p2,AML_MRD_R1_D2_A1,remap_toy1/retagged_sorted.bam,../barcodes1.tsv.gz,AML_MRD_R1_D2_A1
-merge_p1p2,AML_MRD_R2_D1_B2,remap_toy2/retagged_sorted.bam,../barcodes2.tsv.gz,AML_MRD_R2_D1_B2
+merge_p1p2,AML_MRD_R1_D2_A1,../toy1_sorted.bam,../barcodes1.tsv.gz,AML_MRD_R1_D2_A1
+merge_p1p2,AML_MRD_R2_D1_B2,../toy2_sorted.bam,../barcodes2.tsv.gz,AML_MRD_R2_D1_B2
 EOL
 
 cat > vcfs.csv << 'EOL'
@@ -97,11 +35,21 @@ EOL
 
 souporcellx validate --sample-manifest sample_mani.csv --vcf-manifest vcfs.csv
 
+# Dry run first to inspect sbatch commands
 souporcellx run --sample-manifest sample_mani.csv \
                 --vcf-manifest vcfs.csv \
                 --workdir $ROOT/$GROUPID \
                 --ref $REF \
                 --ks 1,2,3,4 \
+                --remap
+
+# Submit
+souporcellx run --sample-manifest sample_mani.csv \
+                --vcf-manifest vcfs.csv \
+                --workdir $ROOT/$GROUPID \
+                --ref $REF \
+                --ks 1,2,3,4 \
+                --remap \
                 --submit
 
 # --- Compare remapped vs non-remapped results ---
@@ -125,7 +73,7 @@ awk '{sum += $4} END {print sum/NR}' $REMAP
 ```
 
 
-## real test of filtering vcf
+## Real test of filtering vcf
 
 
 ```sh
@@ -141,7 +89,7 @@ BAM=/hpc/temp/furlan_s/AML_MRD_DL3/merge_R1D2R2D1_oldwf/out.sorted.bam
 souporcellx filter-vcf --vcf $VCF --bams $BAM --min-cov 20 --output filtered.vcf
 ```
 
-## test workflow on toy and real data
+## Test workflow on toy and real data
 
 ```sh
 
@@ -421,5 +369,3 @@ done
 
 
 ```
-
-
