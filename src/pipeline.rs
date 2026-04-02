@@ -41,19 +41,19 @@ pub fn run(args: RunArgs) -> Result<()> {
     };
 
     // Check external tool availability.
-    let _ = which("minimap2").context("minimap2 not found on PATH")?;
-    if !use_freebayes {
-        // freebayes only needed when explicitly using VCF manifest (legacy check).
-        // When doing de novo calling, the freebayes subcommand will check for it.
+    if args.remap {
+        let _ = which("minimap2").context("minimap2 not found on PATH (required for --remap)")?;
+        let _ = which("samtools").context("samtools not found on PATH (required for --remap)")?;
     }
     if use_freebayes {
-        let _ = which("freebayes").context("freebayes not found on PATH (required for de novo variant calling)")?;
-        let _ = which("bcftools").context("bcftools not found on PATH (required for de novo variant calling)")?;
-        let _ = which("bgzip").context("bgzip not found on PATH (required for de novo variant calling)")?;
-        let _ = which("tabix").context("tabix not found on PATH (required for de novo variant calling)")?;
-    }
-    if args.remap {
-        let _ = which("samtools").context("samtools not found on PATH (required for --remap)")?;
+        let _ = which("freebayes")
+            .context("freebayes not found on PATH (required for --remap without --vcf-manifest)")?;
+        let _ = which("bcftools")
+            .context("bcftools not found on PATH (required for --remap without --vcf-manifest)")?;
+        let _ = which("bgzip")
+            .context("bgzip not found on PATH (required for --remap without --vcf-manifest)")?;
+        let _ = which("tabix")
+            .context("tabix not found on PATH (required for --remap without --vcf-manifest)")?;
     }
 
     let vartrix = toolchain::resolve_binary("vartrix")?;

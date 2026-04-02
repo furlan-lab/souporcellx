@@ -14,9 +14,12 @@ The following must be available on the cluster `PATH`:
 - `sbatch` (Slurm)
 - `Clang` for building vendored tools (lib-hts)
 
-Additional requirements depending on mode:
-- `--remap`: `minimap2`, `samtools`
-- `--remap` without `--vcf-manifest` (de novo): all of the above plus `freebayes`, `bcftools`, `bgzip`, `tabix`
+Additional requirements for `souporcellx run`, depending on mode:
+- with `--vcf-manifest` and no `--remap`: no extra external tools
+- with `--remap` (and `--vcf-manifest`): `minimap2`, `samtools`
+- with `--remap` and no `--vcf-manifest` (de novo): all of the above plus `freebayes`, `bcftools`, `bgzip`, `tabix`
+
+`souporcellx validate` only checks manifest content and does not perform external tool PATH checks.
 
 ## Install
 
@@ -27,25 +30,27 @@ cargo install --path .
 ## Quick start
 
 ```bash
+ml Clang/18.1.8-GCCcore-13.3.0 # need this for lib-hts
+
 cd ~/develop/souporcellx
 cargo install --path .
 souporcellx tools fetch       # clone upstream vartrix & souporcell repos into vendor/
 souporcellx tools bootstrap   # build vendored tools from source
 
-ml freebayes/1.3.2-GCCcore-8.3.0
-ml minimap2/2.29-GCCcore-13.3.0
-ml Clang/18.1.8-GCCcore-13.3.0
-
+# standard run (VCF manifest, no remap): no minimap2/freebayes required
 souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4
 
 # skip coverage filtering if desired
 souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --skip-coverage-filter
 
 # remap + VCF manifest
+ml minimap2/2.29-GCCcore-13.3.0
+ml SAMtools/1.21-GCC-13.3.0
 souporcellx run --sample-manifest samples.csv --vcf-manifest vcfs.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --remap
 
 # de novo variant calling (remap + freebayes, no VCF manifest needed)
-ml SAMtools/1.21-GCC-13.3.0
+ml freebayes/1.3.2-GCCcore-8.3.0
+# bcftools/bgzip/tabix must also be on PATH in this mode
 souporcellx run --sample-manifest samples.csv --ref genome.fa --workdir /path/to/run --ks 1,2,3,4 --remap
 ```
 
