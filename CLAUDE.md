@@ -68,3 +68,4 @@ vendor/
 
 - `minimap2`, `freebayes` — checked at runtime before job submission
 - `sbatch` — required when `--submit` is used
+- `samtools`, `python3`/`python` — required when `--remap` is used

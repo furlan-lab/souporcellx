@@ -114,4 +114,19 @@ pub struct RunArgs {
     /// Skip VCF coverage filtering (pass raw VCFs directly to vartrix).
     #[arg(long, default_value_t = false)]
     pub skip_coverage_filter: bool,
+    /// Enable remapping stage (renamer → minimap2 → retag → sort/index) before vartrix.
+    #[arg(long, default_value_t = false)]
+    pub remap: bool,
+    /// Number of threads for minimap2 and samtools during remapping.
+    #[arg(long, default_value_t = 24)]
+    pub remap_threads: u32,
+    /// BAM tag for UMIs (passed to renamer.py / retag.py).
+    #[arg(long, default_value = "UB")]
+    pub umi_tag: String,
+    /// BAM tag for cell barcodes (passed to renamer.py / retag.py).
+    #[arg(long, default_value = "CB")]
+    pub cell_tag: String,
+    /// Set if BAM files lack UMI tags.
+    #[arg(long, default_value_t = false)]
+    pub no_umi: bool,
 }
