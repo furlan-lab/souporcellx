@@ -1,6 +1,10 @@
 # souporcellx
 
-A Rust-first orchestrator for souporcell workflows on **Slurm clusters**. Supports grouped multi-BAM runs, multiple VCF panels, and pinned local builds for Rust tools.
+<p align="center">
+  <img src="souporcellx_logo.png" alt="souporcellx logo" width="400">
+</p>
+
+A Rust-first orchestrator for [souporcell](https://github.com/wheaton5/souporcell) workflows on **Slurm clusters**. Supports grouped multi-BAM runs, multiple VCF panels, and pinned local builds for Rust tools.
 
 > **Linux only.** souporcellx is designed exclusively for Linux HPC environments running the Slurm workload manager. It generates and submits jobs via `sbatch`.
 
