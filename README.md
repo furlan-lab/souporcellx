@@ -8,6 +8,16 @@ A Rust-first orchestrator for [souporcell](https://github.com/wheaton5/souporcel
 
 > **Linux only.** souporcellx is designed exclusively for Linux HPC environments running the Slurm workload manager. It generates and submits jobs via `sbatch`.
 
+## Installing Rust
+
+souporcellx is built with Rust. If you don't have Rust installed, install it via [rustup](https://rustup.rs/):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Follow the prompts, then restart your shell (or run `source ~/.cargo/env`). Verify with `rustc --version`.
+
 ## Requirements
 
 The following must be available on the cluster `PATH`:
@@ -32,7 +42,7 @@ cargo install --path .
 ```bash
 ml Clang/18.1.8-GCCcore-13.3.0 # need this for lib-hts
 
-cd ~/develop/souporcellx
+cd ~/develop/souporcellx # or whereever you clone this repo
 cargo install --path .
 souporcellx tools fetch       # clone upstream vartrix & souporcell repos into vendor/
 souporcellx tools bootstrap   # build vendored tools from source

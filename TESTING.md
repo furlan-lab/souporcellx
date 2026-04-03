@@ -3,17 +3,10 @@
 Tests the souporcellx remap pipeline on the toy dataset with a VCF manifest.
 
 ```sh
-screen
-grabnode
-24
-200
-7
-N
-
 ml SAMtools
 ml freebayes/1.3.2-GCCcore-8.3.0
 ml minimap2/2.29-GCCcore-13.3.0
-ml Clang/18.1.8-GCCcore-13.3.0
+ml BCFtools/1.19-GCC-13.2.0
 
 ROOT=/home/sfurlan/develop/souporcellx/data
 GROUPID=toy_remap
@@ -37,7 +30,6 @@ souporcellx validate --sample-manifest sample_mani.csv --vcf-manifest vcfs.csv
 
 # Dry run first to inspect sbatch commands
 souporcellx run --sample-manifest sample_mani.csv \
-                --vcf-manifest vcfs.csv \
                 --workdir $ROOT/$GROUPID \
                 --ref $REF \
                 --ks 1,2,3,4 \
@@ -45,7 +37,6 @@ souporcellx run --sample-manifest sample_mani.csv \
 
 # Submit
 souporcellx run --sample-manifest sample_mani.csv \
-                --vcf-manifest vcfs.csv \
                 --workdir $ROOT/$GROUPID \
                 --ref $REF \
                 --ks 1,2,3,4 \
@@ -55,7 +46,7 @@ souporcellx run --sample-manifest sample_mani.csv \
 # --- Compare remapped vs non-remapped results ---
 # After jobs complete, compare cluster assignments
 NOREMAP=$ROOT/toy/kg1k/souporcell_2/merge_p1p2/clusters.tsv
-REMAP=$ROOT/$GROUPID/kg1k/souporcell_2/merge_p1p2/clusters.tsv
+REMAP=$ROOT/$GROUPID/denovo/souporcell_2/merge_p1p2/clusters.tsv
 
 echo "=== no-remap ==="
 head $NOREMAP
@@ -368,4 +359,160 @@ sbatch -n 1 -c 1 -p campus-new --dependency=afterok:$LASTRUN2 --mem-per-cpu=1600
 done
 
 
+```
+
+```sh
+cd ~/develop/souporcellx
+ml R/4.4.2-gfbf-2024a
+R
+
+```
+
+
+```R
+library(tidyverse)
+library(ggalluvial)
+library(pheatmap)
+library(patchwork)
+
+# Load data
+kg1k <- read_tsv("data/toy/kg1k/souporcell_2/merge_p1p2/clusters.tsv") %>%
+  mutate(vcf = "kg1k")
+kg1k_deep <- read_tsv("data/toy/kg1k_deep/souporcell_2/merge_p1p2/clusters.tsv") %>%
+  mutate(vcf = "kg1k_deep")
+std <- read_tsv("data/toy/souporcell_2/clusters.tsv") %>%
+  mutate(vcf = "std")
+
+
+# Merge on barcode
+merged <- inner_join(
+  kg1k %>% select(barcode, status_kg1k = status, assign_kg1k = assignment,
+                  singlet_post_kg1k = singlet_posterior,
+                  log_prob_kg1k = log_prob_singleton),
+  kg1k_deep %>% select(barcode, status_deep = status, assign_deep = assignment,
+                       singlet_post_deep = singlet_posterior,
+                       log_prob_deep = log_prob_singleton),
+  by = "barcode"
+) # %>%
+#   inner_join(
+#     std %>% select(barcode, status_std = status, assign_std = assignment,
+#                        singlet_post_std = singlet_posterior,
+#                        log_prob_std = log_prob_singleton),
+#     by = "barcode"
+
+# --- 1. Genotype PCA (a la flscuts add_souporcell_seurat) ---
+# Normalize cluster log-probs by column mean, log10-transform, then PCA.
+geno_pca_plot <- function(df, title) {
+  cluster_cols <- grep("^cluster\\d+$", colnames(df), value = TRUE)
+  mat <- as.matrix(df[, cluster_cols])
+  # normalize by column means
+  mat <- sweep(mat, 2, colMeans(mat), "/")
+  # handle zeros/negatives before log10
+  mat[mat <= 0] <- .Machine$double.eps
+  mat <- log10(mat)
+  colnames(mat) <- c("x", "y")
+  #PCA
+  pca <- prcomp(mat, center = TRUE, scale. = TRUE)
+  pca_df <- as.data.frame(pca$x) %>%
+    mutate(assignment = factor(df$assignment),
+           status = df$status)
+  ggplot(pca_df, aes(x = PC1, y = PC2, color = assignment)) +
+    geom_point(size = 1.2) +
+    scale_color_brewer(palette = "Set1") +
+    labs(title = title, color = "Cluster") +
+    theme_minimal() +
+    theme(legend.position = "bottom")
+  # pdf <- as.data.frame(mat)
+  # pdf$assignment <- factor(df$assignment)
+  # ggplot(pdf, aes(x = x, y = y, color = assignment)) +
+  #   geom_point(size = 1.2) +
+  #   scale_color_brewer(palette = "Set1") +
+  #   labs(title = title, color = "Cluster") +
+  #   theme_minimal() +
+  #   theme(legend.position = "bottom")
+}
+
+p1a <- geno_pca_plot(kg1k, "kg1k")
+p1a
+p1b <- geno_pca_plot(kg1k_deep, "kg1k_deep")
+p1b
+p1c <- geno_pca_plot(std, "std")
+p1c
+p1a + p1b + p1c + plot_annotation(title = "Genotype PCA of cluster log-probabilities")
+
+# --- 2. Concordance heatmap (cross-tabulation) ---
+ct <- table(kg1k = merged$assign_kg1k, kg1k_deep = merged$assign_deep)
+ct_df <- as.data.frame.matrix(ct)
+
+pheatmap(ct_df,
+         display_numbers = TRUE, number_format = "%d",
+         cluster_rows = FALSE, cluster_cols = FALSE,
+         color = colorRampPalette(c("white", "steelblue"))(50),
+         main = "Cluster assignment concordance\n(kg1k vs kg1k_deep)")
+
+# --- 3. Barcode-level scatter plots ---
+p3a <- ggplot(merged, aes(x = log_prob_kg1k, y = log_prob_deep)) +
+  geom_point(aes(color = factor(assign_kg1k)), size = 1.2) +
+  geom_abline(linetype = "dashed", color = "grey40") +
+  labs(x = "log P(singlet) - kg1k", y = "log P(singlet) - kg1k_deep",
+       color = "Cluster\n(kg1k)", title = "Log-probability of singlet") +
+  theme_minimal()
+
+p3b <- ggplot(merged, aes(x = singlet_post_kg1k, y = singlet_post_deep)) +
+  geom_point(aes(color = factor(assign_kg1k)), size = 1.2) +
+  geom_abline(linetype = "dashed", color = "grey40") +
+  labs(x = "Singlet posterior - kg1k", y = "Singlet posterior - kg1k_deep",
+       color = "Cluster\n(kg1k)", title = "Singlet posterior") +
+  theme_minimal()
+
+p3a + p3b + plot_annotation(title = "Barcode-level comparison across VCF panels")
+
+# --- 4. Alluvial / Sankey diagram ---
+alluv <- merged %>%
+  count(assign_kg1k, assign_deep, assign_std) %>%
+  mutate(assign_kg1k = factor(assign_kg1k), assign_deep = factor(assign_deep), assign_std = factor(assign_std))
+
+ggplot(alluv, aes(axis1 = assign_kg1k, axis2 = assign_deep, y = n)) +
+  geom_alluvium(aes(fill = assign_kg1k), width = 1/6, alpha = 1) +
+  geom_stratum(width = 1/6, fill = "grey90", color = "grey30") +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("kg1k", "kg1k_deep"), expand = c(0.15, 0.05)) +
+  scale_fill_brewer(palette = "Set2") +
+  labs(title = "Barcode flow between cluster assignments",
+       y = "Number of barcodes", fill = "Cluster\n(kg1k)") +
+  theme_minimal()
+
+# --- 5. Side-by-side bar plots ---
+combined <- bind_rows(kg1k, kg1k_deep)
+
+p5a <- ggplot(combined, aes(x = factor(assignment), fill = vcf)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Cluster assignment", y = "Count", fill = "VCF panel",
+       title = "Cluster sizes") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal()
+
+p5b <- ggplot(combined, aes(x = status, fill = vcf)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Status", y = "Count", fill = "VCF panel",
+       title = "Singlet / doublet counts") +
+  scale_fill_brewer(palette = "Set1") +
+  theme_minimal()
+
+p5a + p5b + plot_annotation(title = "Distribution comparison across VCF panels")
+
+
+NOREMAP="/home/sfurlan/develop/souporcellx/data/toy/kg1k/souporcell_2/merge_p1p2/clusters.tsv"
+file.exists(NOREMAP)
+REMAP="/home/sfurlan/develop/souporcellx/data/toy_remap/denovo/souporcell_2/merge_p1p2/clusters.tsv"
+file.exists(REMAP)
+
+remap <- read_tsv(REMAP) %>%
+  mutate(vcf = "remap")
+noremap <- read_tsv(NOREMAP) %>%
+  mutate(vcf = "noremap")
+
+p1 <- geno_pca_plot(remap, "remap")
+p2 <-geno_pca_plot(noremap, "noremap")
+p1 + p2
 ```
