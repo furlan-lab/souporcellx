@@ -140,52 +140,6 @@ souporcellx manifest --cellranger-dirs /path/to/sample1 /path/to/sample2 \
 | `--prefixes` | *(uses library_id)* | Barcode prefixes, one per sample. Adds a `prefix` column to the output |
 | `--output` | stdout | Write manifest to a file |
 
-## Staging Cell Ranger outputs (`stage`)
-
-> **Note:** This command has nothing to do with souporcell or genotype demultiplexing. It is a general-purpose utility for copying Cell Ranger output files from a remote or shared filesystem to a local destination for use in downstream R or Python workflows.
-
-The `stage` command copies a curated subset of Cell Ranger output files — web summaries, metrics CSVs, count matrices, and optionally VDJ results — to a local directory. Large files such as BAMs, FASTQ files, and BAM indexes are intentionally excluded. The source directory structure is mirrored under `--dest`.
-
-It auto-detects the Cell Ranger layout:
-
-| Layout | Detected by | Files staged |
-|---|---|---|
-| `cellranger count` (CR 5+) | presence of `outs/possorted_genome_bam.bam` | `outs/*.html`, `outs/*.csv`, `outs/*matrix.h5` |
-| `cellranger multi` (CR 6+) | presence of `outs/per_sample_outs/` | per-sample `*.html`, `*.csv`; `count/*matrix.h5`; optionally VDJ |
-
-```bash
-# Stage two Cell Ranger runs to a local directory
-souporcellx stage \
-    --cellranger-dirs /cluster/runs/sample1 /cluster/runs/sample2 \
-    --dest /local/data/project1
-
-# Include VDJ output files
-souporcellx stage \
-    --cellranger-dirs /cluster/runs/sample1 \
-    --dest /local/data/project1 \
-    --include-vdj
-
-# Also copy souporcell cluster results from a merge directory
-souporcellx stage \
-    --cellranger-dirs /cluster/runs/sample1 /cluster/runs/sample2 \
-    --souporcell-dirs /cluster/runs/merge_group1 \
-    --dest /local/data/project1
-
-# Dry run: print what would be copied without copying
-souporcellx stage \
-    --cellranger-dirs /cluster/runs/sample1 \
-    --dest /local/data/project1 \
-    --dry-run
-```
-
-| Option | Default | Description |
-|---|---|---|
-| `--cellranger-dirs` | *(required)* | One or more Cell Ranger output directories |
-| `--dest` | *(required)* | Local destination directory |
-| `--souporcell-dirs` | *(none)* | Directories containing `souporcell_*/` result subdirs; copies `clusters.tsv` and `log.tsv` |
-| `--include-vdj` | off | Also copy VDJ files (`.csv`, `.fasta`, `.tsv`, `.json`) |
-| `--dry-run` | off | Print files that would be copied without copying them |
-
 ## Remapping (`--remap`)
 
 The `--remap` flag enables a per-sample BAM remapping stage before vartrix. This mirrors the remapping step in the original `souporcell_pipeline.py`: cell barcodes and UMIs are extracted from BAM tags, reads are realigned with `minimap2`, and tags are reattached.
@@ -310,3 +264,49 @@ vendor/
 `tools bootstrap` builds release binaries and registers them under the local cache directory (`~/.cache/souporcellx/tools/`).
 
 `tools update` pulls the latest from both repos and rebuilds.
+
+## Staging Cell Ranger outputs (`stage`)
+
+> **Note:** This command has nothing to do with souporcell or genotype demultiplexing. It is a general-purpose utility for copying Cell Ranger output files from a remote or shared filesystem to a local destination for use in downstream R or Python workflows.
+
+The `stage` command copies a curated subset of Cell Ranger output files — web summaries, metrics CSVs, count matrices, and optionally VDJ results — to a local directory. Large files such as BAMs, FASTQ files, and BAM indexes are intentionally excluded. The source directory structure is mirrored under `--dest`.
+
+It auto-detects the Cell Ranger layout:
+
+| Layout | Detected by | Files staged |
+|---|---|---|
+| `cellranger count` (CR 5+) | presence of `outs/possorted_genome_bam.bam` | `outs/*.html`, `outs/*.csv`, `outs/*matrix.h5` |
+| `cellranger multi` (CR 6+) | presence of `outs/per_sample_outs/` | per-sample `*.html`, `*.csv`; `count/*matrix.h5`; optionally VDJ |
+
+```bash
+# Stage two Cell Ranger runs to a local directory
+souporcellx stage \
+    --cellranger-dirs /cluster/runs/sample1 /cluster/runs/sample2 \
+    --dest /local/data/project1
+
+# Include VDJ output files
+souporcellx stage \
+    --cellranger-dirs /cluster/runs/sample1 \
+    --dest /local/data/project1 \
+    --include-vdj
+
+# Also copy souporcell cluster results from a merge directory
+souporcellx stage \
+    --cellranger-dirs /cluster/runs/sample1 /cluster/runs/sample2 \
+    --souporcell-dirs /cluster/runs/merge_group1 \
+    --dest /local/data/project1
+
+# Dry run: print what would be copied without copying
+souporcellx stage \
+    --cellranger-dirs /cluster/runs/sample1 \
+    --dest /local/data/project1 \
+    --dry-run
+```
+
+| Option | Default | Description |
+|---|---|---|
+| `--cellranger-dirs` | *(required)* | One or more Cell Ranger output directories |
+| `--dest` | *(required)* | Local destination directory |
+| `--souporcell-dirs` | *(none)* | Directories containing `souporcell_*/` result subdirs; copies `clusters.tsv` and `log.tsv` |
+| `--include-vdj` | off | Also copy VDJ files (`.csv`, `.fasta`, `.tsv`, `.json`) |
+| `--dry-run` | off | Print files that would be copied without copying them |
