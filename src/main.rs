@@ -8,6 +8,7 @@ mod pipeline;
 mod renamer;
 mod retag;
 mod slurm;
+mod stage;
 mod toolchain;
 
 use anyhow::Result;
@@ -71,6 +72,19 @@ fn main() -> Result<()> {
             sample_manifest,
             vcf_manifest,
         } => pipeline::validate_manifests(&sample_manifest, &vcf_manifest),
+        Commands::Stage {
+            cellranger_dirs,
+            dest,
+            souporcell_dirs,
+            include_vdj,
+            dry_run,
+        } => stage::run(stage::StageArgs {
+            cellranger_dirs,
+            dest,
+            souporcell_dirs,
+            include_vdj,
+            dry_run,
+        }),
         Commands::Run(args) => pipeline::run(args),
     }
 }

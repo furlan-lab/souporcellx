@@ -122,6 +122,24 @@ pub enum Commands {
         #[arg(long)]
         output_dir: PathBuf,
     },
+    /// Copy Cell Ranger outputs (and optionally souporcell results) to a local destination.
+    Stage {
+        /// One or more Cell Ranger output directories to stage.
+        #[arg(long, required = true, num_args = 1..)]
+        cellranger_dirs: Vec<PathBuf>,
+        /// Destination directory. Source structure is mirrored under here.
+        #[arg(long)]
+        dest: PathBuf,
+        /// Directories containing souporcell_* result subdirs to also stage.
+        #[arg(long, num_args = 1..)]
+        souporcell_dirs: Option<Vec<PathBuf>>,
+        /// Include VDJ output files (.csv, .fasta, .tsv, .json).
+        #[arg(long, default_value_t = false)]
+        include_vdj: bool,
+        /// Print files that would be copied without copying them.
+        #[arg(long, default_value_t = false)]
+        dry_run: bool,
+    },
     /// Submit or print the workflow plan.
     Run(RunArgs),
 }
