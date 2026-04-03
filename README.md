@@ -142,9 +142,9 @@ souporcellx manifest --cellranger-dirs /path/to/sample1 /path/to/sample2 \
 
 ## Staging Cell Ranger outputs (`stage`)
 
-> **Note:** This command has nothing to do with souporcell or genotype demultiplexing. It is a general-purpose utility for copying Cell Ranger output files from a remote or shared filesystem to a local destination.
+> **Note:** This command has nothing to do with souporcell or genotype demultiplexing. It is a general-purpose utility for copying Cell Ranger output files from a remote or shared filesystem to a local destination for use in downstream R or Python workflows.
 
-The `stage` command copies a curated subset of Cell Ranger output files — web summaries, metrics CSVs, count matrices, and optionally VDJ results — to a local directory. The source directory structure is mirrored under `--dest`.
+The `stage` command copies a curated subset of Cell Ranger output files — web summaries, metrics CSVs, count matrices, and optionally VDJ results — to a local directory. Large files such as BAMs, FASTQ files, and BAM indexes are intentionally excluded. The source directory structure is mirrored under `--dest`.
 
 It auto-detects the Cell Ranger layout:
 
